@@ -1,12 +1,16 @@
 from __future__ import annotations
 
-from typing import Optional
+import asyncio
+import json
 
-from recut.schema.fork import ForkDiff, ForkInjection, ForkType, RecutFork
-from recut.schema.trace import RecutTrace, RecutStep
-from recut.providers.base import AbstractProvider
 from recut.flagging.engine import FlaggingEngine
 from recut.plain.summariser import summarise_step
+from recut.providers.base import AbstractProvider
+from recut.schema.fork import ForkDiff, ForkInjection, ForkType, RecutFork
+from recut.schema.trace import RecutStep, RecutTrace
+from recut.storage.circuit_breaker import is_open, record_failure, record_success
+from recut.storage.db import StorageClient
+from recut.storage.models import ForkRow
 
 
 async def replay(
@@ -58,7 +62,6 @@ async def diff(trace: RecutTrace, fork: RecutFork) -> ForkDiff:
     if fork.diff is not None:
         return fork.diff
 
-    from recut.schema.trace import RecutStep
     original = trace.steps[fork.fork_step_index:]
     replayed = [RecutStep(**s) for s in fork.replay_steps]
     return _compute_diff(original, replayed, fork.fork_step_index)
@@ -71,7 +74,7 @@ def _compute_diff(
 ) -> ForkDiff:
     divergence_step = fork_index
 
-    for i, (orig, rep) in enumerate(zip(original_steps, replayed_steps)):
+    for i, (orig, rep) in enumerate(zip(original_steps, replayed_steps, strict=False)):
         if orig.content != rep.content:
             divergence_step = fork_index + i
             break
@@ -101,21 +104,22 @@ def _compute_diff(
 
 
 async def _persist_fork(fork: RecutFork) -> None:
-    import asyncio
-    import json
-    from recut.storage.db import StorageClient
-    from recut.storage.models import ForkRow
-
-    row = ForkRow(
-        id=fork.id,
-        created_at=fork.created_at,
-        parent_trace_id=fork.parent_trace_id,
-        fork_step_index=fork.fork_step_index,
-        fork_type=fork.fork_type.value,
-        injection_json=fork.injection.model_dump_json(),
-        replay_steps_json=json.dumps(fork.replay_steps),
-        diff_json=fork.diff.model_dump_json() if fork.diff else None,
-    )
-    client = StorageClient()
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, client.save_fork_row, row)
+    if is_open():
+        return
+    try:
+        row = ForkRow(
+            id=fork.id,
+            created_at=fork.created_at,
+            parent_trace_id=fork.parent_trace_id,
+            fork_step_index=fork.fork_step_index,
+            fork_type=fork.fork_type.value,
+            injection_json=fork.injection.model_dump_json(),
+            replay_steps_json=json.dumps(fork.replay_steps),
+            diff_json=fork.diff.model_dump_json() if fork.diff else None,
+        )
+        loop = asyncio.get_running_loop()
+        client = StorageClient()
+        await loop.run_in_executor(None, client.save_fork_row, row)
+        record_success()
+    except Exception:  # noqa: BLE001
+        record_failure()

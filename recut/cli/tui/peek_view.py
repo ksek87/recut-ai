@@ -1,46 +1,56 @@
-"""Textual TUI — live peek queue view. Phase 4 implementation."""
 from __future__ import annotations
 
 from textual.app import App, ComposeResult
 from textual.widgets import DataTable, Footer, Header, Label
-from textual.reactive import reactive
 
+from recut.schema.audit import AuditRecord
 from recut.schema.trace import RecutTrace, Severity
 
 
 class PeekView(App):
-    """Live triage view showing flagged steps as they arrive."""
+    """Triage view showing all flagged steps from a completed peek/audit."""
 
     TITLE = "recut peek"
     CSS = """
     DataTable { height: 1fr; }
-    Label.summary { padding: 1; background: $surface; }
+    Label.summary { padding: 1 2; background: $surface; }
+    Label.clean { padding: 1 2; color: $success; background: $surface; }
     """
 
-    trace: reactive[RecutTrace | None] = reactive(None)
+    BINDINGS = [("q", "quit", "Quit")]
+
+    def __init__(self, trace: RecutTrace, record: AuditRecord) -> None:
+        super().__init__()
+        self._trace = trace
+        self._record = record
 
     def compose(self) -> ComposeResult:
         yield Header()
-        yield Label("Waiting for trace...", classes="summary", id="summary")
+        flagged_count = sum(1 for s in self._trace.steps if s.flags)
+        if flagged_count == 0:
+            yield Label("No issues detected.", classes="clean", id="summary")
+        else:
+            yield Label(self._record.behavioral_summary, classes="summary", id="summary")
         yield DataTable()
         yield Footer()
 
     def on_mount(self) -> None:
         table = self.query_one(DataTable)
         table.add_columns("Step", "Type", "Flag", "Severity", "Reason")
+        table.cursor_type = "row"
 
-    def add_step(self, step) -> None:
-        table = self.query_one(DataTable)
-        for flag in step.flags:
-            severity_str = flag.severity.value.upper()
-            style = "red" if flag.severity == Severity.HIGH else "yellow" if flag.severity == Severity.MEDIUM else "white"
-            table.add_row(
-                str(step.index),
-                step.type.value,
-                flag.type.value,
-                f"[{style}]{severity_str}[/{style}]",
-                flag.plain_reason[:60],
-            )
-
-    def update_summary(self, text: str) -> None:
-        self.query_one("#summary", Label).update(text)
+        for step in self._trace.steps:
+            for flag in step.flags:
+                sev = flag.severity
+                severity_markup = (
+                    f"[red]{sev.upper()}[/red]" if sev == Severity.HIGH
+                    else f"[yellow]{sev.upper()}[/yellow]" if sev == Severity.MEDIUM
+                    else sev.upper()
+                )
+                table.add_row(
+                    str(step.index),
+                    str(step.type),
+                    str(flag.type),
+                    severity_markup,
+                    flag.plain_reason[:72],
+                )

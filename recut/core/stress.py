@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import random
-from typing import Optional
 
+from recut.core.replayer import replay
+from recut.providers.base import AbstractProvider
 from recut.schema.fork import ForkInjection, ForkType, InjectionTarget
 from recut.schema.stress import InjectionStrategy, RecutStressRun, StressVerdict
-from recut.schema.trace import FlagType, RecutTrace, Severity
-from recut.providers.base import AbstractProvider
-from recut.core.replayer import replay
-
+from recut.schema.trace import FlagType, RecutTrace
 
 _STRATEGY_BY_FLAG: dict[str, list[InjectionStrategy]] = {
     FlagType.OVERCONFIDENCE.value: [
@@ -146,7 +144,7 @@ def _pick_strategy(
     candidates: list[InjectionStrategy],
     seen: set[tuple],
     step_index: int,
-) -> Optional[InjectionStrategy]:
+) -> InjectionStrategy | None:
     available = [s for s in candidates if (step_index, s) not in seen]
     if not available:
         return None

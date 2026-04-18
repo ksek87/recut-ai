@@ -2,18 +2,17 @@ from __future__ import annotations
 
 import json
 import os
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 import openai as _openai
 
+from recut.providers.base import AbstractProvider
 from recut.schema.trace import (
-    RecutStep,
     ReasoningSource,
+    RecutStep,
     StepReasoning,
     StepType,
 )
-from recut.providers.base import AbstractProvider
-
 
 _INFERRED_REASONING_PROMPT = """You are analyzing an AI assistant's response.
 Reconstruct the likely reasoning the model used to arrive at this response.
@@ -47,11 +46,10 @@ class OpenAIProvider(AbstractProvider):
     async def capture_step(self, raw_response: dict) -> RecutStep:
         content = raw_response.get("content", "")
         step_type_str = raw_response.get("type", "output")
-        step_type = (
-            StepType(step_type_str)
-            if step_type_str in StepType._value2member_map_
-            else StepType.OUTPUT
-        )
+        try:
+            step_type = StepType(step_type_str)
+        except ValueError:
+            step_type = StepType.OUTPUT
 
         reasoning = None
         if self.infer_reasoning and content:

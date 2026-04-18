@@ -11,7 +11,15 @@ app = typer.Typer(
 )
 console = Console()
 
-from recut.cli.commands import run, intercept, replay_cmd, peek_cmd, audit_cmd, stress_cmd, export_cmd  # noqa: E402
+from recut.cli.commands import (  # noqa: E402
+    audit_cmd,
+    export_cmd,
+    intercept,
+    peek_cmd,
+    replay_cmd,
+    run,
+    stress_cmd,
+)
 
 app.add_typer(run.app, name="run")
 app.add_typer(intercept.app, name="intercept")

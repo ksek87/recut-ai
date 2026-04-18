@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from enum import Enum
-from pydantic import BaseModel, Field
 import uuid
+from enum import StrEnum
+
+from pydantic import BaseModel, Field
 
 
-class InjectionStrategy(str, Enum):
+class InjectionStrategy(StrEnum):
     AMPLIFY_UNCERTAINTY = "amplify_uncertainty"
     CONTRADICT_TOOL_RESULT = "contradict_tool_result"
     INTRODUCE_AMBIGUITY = "introduce_ambiguity"
@@ -13,7 +14,7 @@ class InjectionStrategy(str, Enum):
     ADVERSARIAL_INPUT = "adversarial_input"
 
 
-class StressVerdict(str, Enum):
+class StressVerdict(StrEnum):
     STABLE = "stable"
     DEGRADED = "degraded"
     FAILED = "failed"

@@ -1,27 +1,53 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
-from recut.schema.trace import (
-    FlagSource,
-    FlagType,
-    RecutFlag,
-    RecutStep,
-    ReasoningSource,
-    Severity,
-    StepType,
-    TraceMode,
-)
+import anthropic
+
 from recut.flagging.flags import (
     CONFIDENCE_PHRASES,
     UNCERTAINTY_PHRASES,
     Thresholds,
 )
 from recut.flagging.prompts import BATCH_FLAGGING_PROMPT, FLAGGING_SYSTEM_PROMPT
+from recut.schema.trace import (
+    FlagSource,
+    FlagType,
+    ReasoningSource,
+    RecutFlag,
+    RecutStep,
+    Severity,
+    StepType,
+    TraceMode,
+)
+from recut.storage.db import StorageClient
+from recut.storage.models import FlagCache
+
+# Module-level singletons to avoid re-creating on every call
+_anthropic_client: anthropic.AsyncAnthropic | None = None
+_embedding_model = None
+
+# Per-process Layer 4 call counter — prevents runaway costs in long audit sessions
+_l4_call_count: int = 0
+
+
+def _get_anthropic_client() -> anthropic.AsyncAnthropic:
+    global _anthropic_client
+    if _anthropic_client is None:
+        _anthropic_client = anthropic.AsyncAnthropic()
+    return _anthropic_client
+
+
+def _get_embedding_model():
+    global _embedding_model
+    if _embedding_model is None:
+        from sentence_transformers import SentenceTransformer
+        _embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+    return _embedding_model
 
 
 class FlaggingEngine:
@@ -79,7 +105,7 @@ class FlaggingEngine:
 
         # Layer 2 — embedding similarity
         if self._use_embeddings:
-            embedding_flags = await _layer2_embeddings(step, preceding_steps, original_prompt)
+            embedding_flags = await _layer2_embeddings(step, original_prompt)
             flags.extend(embedding_flags)
 
         # Layer 4 — batched LLM judge (only for high-stakes steps in qualifying modes)
@@ -97,7 +123,6 @@ class FlaggingEngine:
     ) -> dict[str, list[RecutFlag]]:
         """Score multiple steps at once. Layer 4 batches these into one LLM call."""
         results: dict[str, list[RecutFlag]] = {}
-
         llm_candidates: list[RecutStep] = []
 
         for i, step in enumerate(steps):
@@ -113,7 +138,11 @@ class FlaggingEngine:
 
             # Layers 1 and 3
             step_flags.extend(_layer1_rules(step, preceding))
-            if not step_flags and step.reasoning and step.reasoning.source == ReasoningSource.NATIVE:
+            if (
+                not step_flags
+                and step.reasoning
+                and step.reasoning.source == ReasoningSource.NATIVE
+            ):
                 mf = _layer3_native_mismatch(step)
                 if mf:
                     step_flags.append(mf)
@@ -127,7 +156,6 @@ class FlaggingEngine:
         # Batch the LLM judge call for all candidates at once
         if llm_candidates and self._use_llm_judge:
             llm_results = await _layer4_llm_judge(llm_candidates, original_prompt)
-            # llm_results is a flat list — assign back by step_id in flag.step_id
             for flag in llm_results:
                 results.setdefault(flag.step_id, []).append(flag)
 
@@ -140,38 +168,55 @@ class FlaggingEngine:
 
 def _layer1_rules(step: RecutStep, preceding: list[RecutStep]) -> list[RecutFlag]:
     flags: list[RecutFlag] = []
-    content_lower = step.content.lower()
 
     # Reasoning block empty but non-reasoning action taken
-    if step.type in (StepType.TOOL_CALL, StepType.OUTPUT):
-        if step.reasoning and not step.reasoning.content.strip():
-            flags.append(RecutFlag(
-                type=FlagType.REASONING_GAP,
-                severity=Severity.MEDIUM,
-                plain_reason="The agent took an action without any reasoning — it's unclear why it made this choice.",
-                step_id=step.id,
-                source=FlagSource.RULE,
-            ))
+    if (
+        step.type in (StepType.TOOL_CALL, StepType.OUTPUT)
+        and step.reasoning
+        and not step.reasoning.content.strip()
+    ):
+        flags.append(RecutFlag(
+            type=FlagType.REASONING_GAP,
+            severity=Severity.MEDIUM,
+            plain_reason=(
+                "The agent took an action without any reasoning — "
+                "it's unclear why it made this choice."
+            ),
+            step_id=step.id,
+            source=FlagSource.RULE,
+        ))
 
     # Tool call with no preceding reasoning step at all
-    if step.type == StepType.TOOL_CALL and step.reasoning is None:
-        if not any(p.type == StepType.REASONING for p in preceding):
-            flags.append(RecutFlag(
-                type=FlagType.ANOMALOUS_TOOL_USE,
-                severity=Severity.LOW,
-                plain_reason="The agent used a tool without any visible reasoning beforehand — worth a quick look.",
-                step_id=step.id,
-                source=FlagSource.RULE,
-            ))
+    if (
+        step.type == StepType.TOOL_CALL
+        and step.reasoning is None
+        and not any(p.type == StepType.REASONING for p in preceding)
+    ):
+        flags.append(RecutFlag(
+            type=FlagType.ANOMALOUS_TOOL_USE,
+            severity=Severity.LOW,
+            plain_reason=(
+                "The agent used a tool without any visible reasoning beforehand "
+                "— worth a quick look."
+            ),
+            step_id=step.id,
+            source=FlagSource.RULE,
+        ))
 
     # Repeated identical tool calls
     if step.type == StepType.TOOL_CALL and preceding:
-        identical = [p for p in preceding if p.type == StepType.TOOL_CALL and p.content == step.content]
+        identical = [
+            p for p in preceding
+            if p.type == StepType.TOOL_CALL and p.content == step.content
+        ]
         if identical:
             flags.append(RecutFlag(
                 type=FlagType.ANOMALOUS_TOOL_USE,
                 severity=Severity.HIGH,
-                plain_reason="The agent called the same tool with identical inputs more than once — this looks like a loop.",
+                plain_reason=(
+                    "The agent called the same tool with identical inputs more than once "
+                    "— this looks like a loop."
+                ),
                 step_id=step.id,
                 source=FlagSource.RULE,
             ))
@@ -181,7 +226,10 @@ def _layer1_rules(step: RecutStep, preceding: list[RecutStep]) -> list[RecutFlag
         flags.append(RecutFlag(
             type=FlagType.SCOPE_CREEP,
             severity=Severity.LOW,
-            plain_reason=f"The agent is on step {step.index + 1}, which is more steps than expected for most tasks.",
+            plain_reason=(
+                f"The agent is on step {step.index + 1}, "
+                "which is more steps than expected for most tasks."
+            ),
             step_id=step.id,
             source=FlagSource.RULE,
         ))
@@ -193,7 +241,7 @@ def _layer1_rules(step: RecutStep, preceding: list[RecutStep]) -> list[RecutFlag
 # Layer 3 — Native reasoning/action mismatch (Claude only)
 # ---------------------------------------------------------------------------
 
-def _layer3_native_mismatch(step: RecutStep) -> Optional[RecutFlag]:
+def _layer3_native_mismatch(step: RecutStep) -> RecutFlag | None:
     if step.reasoning is None or step.reasoning.source != ReasoningSource.NATIVE:
         return None
 
@@ -224,7 +272,6 @@ def _layer3_native_mismatch(step: RecutStep) -> Optional[RecutFlag]:
 
 async def _layer2_embeddings(
     step: RecutStep,
-    preceding: list[RecutStep],
     original_prompt: str,
 ) -> list[RecutFlag]:
     """
@@ -232,7 +279,6 @@ async def _layer2_embeddings(
     Falls back gracefully if sentence-transformers is not installed.
     """
     try:
-        from sentence_transformers import SentenceTransformer
         import numpy as np
     except ImportError:
         return []
@@ -245,9 +291,10 @@ async def _layer2_embeddings(
 
         prompt_emb = model.encode(original_prompt)
         step_emb = model.encode(step.content)
-        similarity = float(np.dot(prompt_emb, step_emb) / (
-            np.linalg.norm(prompt_emb) * np.linalg.norm(step_emb) + 1e-10
-        ))
+        similarity = float(
+            np.dot(prompt_emb, step_emb)
+            / (np.linalg.norm(prompt_emb) * np.linalg.norm(step_emb) + 1e-10)
+        )
 
         if similarity < (1.0 - threshold):
             flags.append(RecutFlag(
@@ -263,9 +310,10 @@ async def _layer2_embeddings(
 
         if step.reasoning and step.reasoning.content:
             reasoning_emb = model.encode(step.reasoning.content)
-            ra_similarity = float(np.dot(reasoning_emb, step_emb) / (
-                np.linalg.norm(reasoning_emb) * np.linalg.norm(step_emb) + 1e-10
-            ))
+            ra_similarity = float(
+                np.dot(reasoning_emb, step_emb)
+                / (np.linalg.norm(reasoning_emb) * np.linalg.norm(step_emb) + 1e-10)
+            )
             if ra_similarity < (1.0 - threshold):
                 flags.append(RecutFlag(
                     type=FlagType.REASONING_ACTION_MISMATCH,
@@ -279,18 +327,8 @@ async def _layer2_embeddings(
                 ))
 
         return flags
-    except Exception:
+    except Exception:  # noqa: BLE001
         return []
-
-
-_embedding_model = None
-
-def _get_embedding_model():
-    global _embedding_model
-    if _embedding_model is None:
-        from sentence_transformers import SentenceTransformer
-        _embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
-    return _embedding_model
 
 
 # ---------------------------------------------------------------------------
@@ -302,7 +340,11 @@ async def _layer4_llm_judge(
     original_prompt: str,
 ) -> list[RecutFlag]:
     """Call a cheap meta-LLM to judge multiple steps in one batched request."""
-    import anthropic
+    global _l4_call_count
+    max_calls = int(os.environ.get("RECUT_L4_MAX_CALLS", 50))
+    if max_calls > 0 and _l4_call_count >= max_calls:
+        return []
+    _l4_call_count += 1
 
     meta_model = os.environ.get("RECUT_META_MODEL", "claude-haiku-4-5-20251001")
 
@@ -310,7 +352,7 @@ async def _layer4_llm_judge(
         {
             "step_id": s.id,
             "index": s.index,
-            "type": s.type.value,
+            "type": str(s.type),
             "content": s.content[:500],
             "reasoning": s.reasoning.content[:300] if s.reasoning else None,
         }
@@ -323,7 +365,7 @@ async def _layer4_llm_judge(
     )
 
     try:
-        client = anthropic.AsyncAnthropic()
+        client = _get_anthropic_client()
         response = await client.messages.create(
             model=meta_model,
             max_tokens=2000,
@@ -332,7 +374,7 @@ async def _layer4_llm_judge(
         )
         raw = response.content[0].text.strip()
         results = json.loads(raw)
-    except Exception:
+    except Exception:  # noqa: BLE001 — Layer 4 is best-effort; any failure falls back to no flags
         return []
 
     flags: list[RecutFlag] = []
@@ -364,7 +406,9 @@ async def _layer4_llm_judge(
             flags.append(RecutFlag(
                 type=flag_type,
                 severity=severity,
-                plain_reason=plain_reasons.get(flag_name, f"Flagged by meta-LLM with score {score:.2f}."),
+                plain_reason=plain_reasons.get(
+                    flag_name, f"Flagged by meta-LLM with score {score:.2f}."
+                ),
                 step_id=step_id,
                 source=FlagSource.LLM,
             ))
@@ -381,20 +425,18 @@ def _cache_key(step: RecutStep, preceding: list[RecutStep]) -> str:
     return hashlib.sha256(context.encode()).hexdigest()
 
 
-async def _get_cached_flags(content_hash: str) -> Optional[list[RecutFlag]]:
+async def _get_cached_flags(content_hash: str) -> list[RecutFlag] | None:
     if os.environ.get("RECUT_CACHE_ENABLED", "true").lower() != "true":
         return None
     try:
-        import asyncio
-        from recut.storage.db import StorageClient
+        loop = asyncio.get_running_loop()
         client = StorageClient()
-        loop = asyncio.get_event_loop()
         row = await loop.run_in_executor(None, client.get_cached_flags, content_hash)
         if row is None:
             return None
         data = json.loads(row.flags_json)
         return [RecutFlag(**f) for f in data]
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
 
 
@@ -402,19 +444,16 @@ async def _cache_flags(content_hash: str, flags: list[RecutFlag]) -> None:
     if os.environ.get("RECUT_CACHE_ENABLED", "true").lower() != "true":
         return
     try:
-        import asyncio
-        from recut.storage.db import StorageClient
-        from recut.storage.models import FlagCache
         ttl = int(os.environ.get("RECUT_CACHE_TTL", 3600))
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         row = FlagCache(
             content_hash=content_hash,
             flags_json=json.dumps([f.model_dump(mode="json") for f in flags]),
             created_at=now,
             expires_at=now + timedelta(seconds=ttl),
         )
+        loop = asyncio.get_running_loop()
         client = StorageClient()
-        loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, client.save_flag_cache, row)
-    except Exception:
+    except Exception:  # noqa: BLE001
         pass

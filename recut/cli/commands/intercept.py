@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -14,18 +13,18 @@ console = Console()
 def intercept_cmd(
     prompt: str = typer.Argument(..., help="The prompt to send to the agent"),
     agent: str = typer.Option("default", "--agent", "-a"),
-    pause_on: Optional[str] = typer.Option(None, "--pause-on", help="Pause on severity: low | medium | high"),
+    pause_on: str | None = typer.Option(None, "--pause-on", help="Pause on severity: low | medium | high"),
 ) -> None:
     """Run an agent and intercept steps in real time."""
     asyncio.run(_intercept_async(prompt, agent, pause_on))
 
 
-async def _intercept_async(prompt: str, agent_id: str, pause_on: Optional[str]) -> None:
-    from recut.providers.anthropic import AnthropicProvider
-    from recut.core.tracer import trace_context
+async def _intercept_async(prompt: str, agent_id: str, pause_on: str | None) -> None:
     from recut.core.interceptor import intercept
-    from recut.schema.trace import TraceMode
+    from recut.core.tracer import trace_context
+    from recut.providers.anthropic import AnthropicProvider
     from recut.schema.hooks import RecutFlagEvent
+    from recut.schema.trace import TraceMode
 
     provider = AnthropicProvider()
 
