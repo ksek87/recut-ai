@@ -1,20 +1,21 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
-from enum import StrEnum
+from datetime import datetime
+from enum import Enum
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
 
-class ReviewStatus(StrEnum):
+class ReviewStatus(str, Enum):
     AUTO = "auto"
     PENDING_HUMAN = "pending_human"
     APPROVED = "approved"
     REJECTED = "rejected"
 
 
-class AuditMode(StrEnum):
+class AuditMode(str, Enum):
     PEEK = "peek"
     AUDIT = "audit"
 
@@ -35,12 +36,12 @@ class AuditRecord(BaseModel):
     trace_id: str
     fork_ids: list[str] = []
     mode: AuditMode
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
     behavioral_summary: str
     flag_count: int = 0
-    highest_severity: str | None = None
+    highest_severity: Optional[str] = None
     risk_profile: RiskProfile = Field(default_factory=RiskProfile)
     review_status: ReviewStatus = ReviewStatus.AUTO
-    review_notes: str | None = None
-    reviewer: str | None = None
-    exported_at: datetime | None = None
+    review_notes: Optional[str] = None
+    reviewer: Optional[str] = None
+    exported_at: Optional[datetime] = None

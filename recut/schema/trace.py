@@ -1,25 +1,26 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
-from enum import StrEnum
+from datetime import datetime
+from enum import Enum
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
 
-class StepType(StrEnum):
+class StepType(str, Enum):
     REASONING = "reasoning"
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
     OUTPUT = "output"
 
 
-class ReasoningSource(StrEnum):
+class ReasoningSource(str, Enum):
     NATIVE = "native"       # real thinking blocks (Claude extended thinking)
     INFERRED = "inferred"   # meta-LLM reconstruction
 
 
-class FlagType(StrEnum):
+class FlagType(str, Enum):
     OVERCONFIDENCE = "overconfidence"
     GOAL_DRIFT = "goal_drift"
     SCOPE_CREEP = "scope_creep"
@@ -30,14 +31,14 @@ class FlagType(StrEnum):
     REASONING_ACTION_MISMATCH = "reasoning_action_mismatch"
 
 
-class FlagSource(StrEnum):
+class FlagSource(str, Enum):
     RULE = "rule"           # layer 1 — free, deterministic
     EMBEDDING = "embedding" # layer 2 — cheap similarity
     NATIVE = "native"       # layer 3 — thinking block analysis, Claude only
     LLM = "llm"             # layer 4 — meta-LLM judgment
 
 
-class Severity(StrEnum):
+class Severity(str, Enum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
@@ -54,7 +55,7 @@ class RecutFlag(BaseModel):
 class StepReasoning(BaseModel):
     source: ReasoningSource
     content: str
-    thinking_tokens: int | None = None
+    thinking_tokens: Optional[int] = None
     confidence: float = Field(ge=0.0, le=1.0)
 
 
@@ -63,14 +64,14 @@ class RecutStep(BaseModel):
     index: int
     type: StepType
     content: str
-    reasoning: StepReasoning | None = None
+    reasoning: Optional[StepReasoning] = None
     risk_score: float = Field(default=0.0, ge=0.0, le=1.0)
     flags: list[RecutFlag] = []
     plain_summary: str = ""
     fork_eligible: bool = True
 
 
-class TraceMode(StrEnum):
+class TraceMode(str, Enum):
     INTERCEPT = "intercept"
     REPLAY = "replay"
     PEEK = "peek"
@@ -78,7 +79,7 @@ class TraceMode(StrEnum):
     STRESS = "stress"
 
 
-class TraceLanguage(StrEnum):
+class TraceLanguage(str, Enum):
     SIMPLE = "simple"
     POWER = "power"
 
@@ -86,15 +87,15 @@ class TraceLanguage(StrEnum):
 class TraceMeta(BaseModel):
     model: str
     provider: str
-    duration_seconds: float | None = None
+    duration_seconds: Optional[float] = None
     total_steps: int = 0
-    token_count: int | None = None
-    thinking_tokens: int | None = None
+    token_count: Optional[int] = None
+    thinking_tokens: Optional[int] = None
 
 
 class RecutTrace(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
     agent_id: str
     prompt: str
     mode: TraceMode

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from typing import Optional
+
 from recut.flagging.engine import FlaggingEngine
 from recut.plain.summariser import summarise_step, summarise_trace
 from recut.schema.audit import AuditMode, AuditRecord, ReviewStatus, RiskProfile
-from recut.schema.trace import FlagType, RecutTrace, Severity, TraceMode
+from recut.schema.trace import FlagType, RecutFlag, RecutTrace, Severity, TraceMode
 
 
 async def peek(trace: RecutTrace) -> AuditRecord:
@@ -28,6 +30,7 @@ async def audit(trace: RecutTrace) -> AuditRecord:
 
 async def _score_trace_steps(trace: RecutTrace, engine: FlaggingEngine) -> None:
     """Score all steps in the trace using the given engine, mutating in-place."""
+    from recut.plain.summariser import summarise_step
 
     for i, step in enumerate(trace.steps):
         preceding = trace.steps[max(0, i - 2) : i]
@@ -38,7 +41,7 @@ async def _score_trace_steps(trace: RecutTrace, engine: FlaggingEngine) -> None:
         step.plain_summary = summarise_step(step, trace.language)
 
 
-def _compute_risk_score(flags: list) -> float:
+def _compute_risk_score(flags: list[RecutFlag]) -> float:
     if not flags:
         return 0.0
     weights = {Severity.LOW: 0.3, Severity.MEDIUM: 0.6, Severity.HIGH: 1.0}
@@ -50,7 +53,7 @@ def _build_audit_record(trace: RecutTrace, mode: AuditMode) -> AuditRecord:
     all_flags = [f for step in trace.steps for f in step.flags]
     profile = _build_risk_profile(all_flags)
 
-    highest: str | None = None
+    highest: Optional[str] = None
     if any(f.severity == Severity.HIGH for f in all_flags):
         highest = Severity.HIGH.value
     elif any(f.severity == Severity.MEDIUM for f in all_flags):
@@ -69,7 +72,7 @@ def _build_audit_record(trace: RecutTrace, mode: AuditMode) -> AuditRecord:
     )
 
 
-def _build_risk_profile(flags: list) -> RiskProfile:
+def _build_risk_profile(flags: list[RecutFlag]) -> RiskProfile:
     profile = RiskProfile()
     counter_map = {
         FlagType.OVERCONFIDENCE: "overconfidence_count",
