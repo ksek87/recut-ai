@@ -20,11 +20,12 @@ def stress_cmd(
 
 
 async def _stress_async(trace_id: str, num_variants: int) -> None:
-    from recut.storage.db import StorageClient
-    from recut.schema.trace import RecutTrace, RecutStep, TraceMeta, TraceMode, TraceLanguage
-    from recut.providers.anthropic import AnthropicProvider
-    from recut.core.stress import stress
     import json
+
+    from recut.core.stress import stress
+    from recut.providers.anthropic import AnthropicProvider
+    from recut.schema.trace import RecutStep, RecutTrace, TraceLanguage, TraceMeta, TraceMode
+    from recut.storage.db import StorageClient
 
     client = StorageClient()
     row = client.get_trace_row(trace_id)

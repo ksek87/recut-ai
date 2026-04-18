@@ -19,16 +19,16 @@ Quick start::
 from __future__ import annotations
 
 import functools
-from typing import Callable
+from collections.abc import Callable
 
-from recut.core.tracer import trace, trace_context, RecutContext
-from recut.core.interceptor import intercept, InterceptSession
-from recut.core.replayer import replay, diff
-from recut.core.auditor import peek, audit
+from recut.core.auditor import audit, peek
+from recut.core.interceptor import InterceptSession, intercept
+from recut.core.replayer import diff, replay
 from recut.core.stress import stress
+from recut.core.tracer import RecutContext, trace, trace_context
 from recut.export.exporter import export, load_export
-from recut.schema.hooks import RecutFlagEvent, FlagHandler
-from recut.schema.trace import TraceMode, TraceLanguage
+from recut.schema.hooks import FlagHandler, RecutFlagEvent
+from recut.schema.trace import TraceLanguage, TraceMode
 
 _flag_handlers: list[Callable] = []
 

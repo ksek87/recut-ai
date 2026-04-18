@@ -2,21 +2,25 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import json
 import os
 import random
 import time
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from datetime import datetime
-from typing import Any, AsyncIterator, Callable, Optional
+from typing import Any
 
+from recut.providers.base import AbstractProvider
 from recut.schema.trace import (
     RecutStep,
     RecutTrace,
-    TraceMeta,
     TraceLanguage,
+    TraceMeta,
     TraceMode,
 )
-from recut.providers.base import AbstractProvider
+from recut.storage.circuit_breaker import is_open, record_failure, record_success
+from recut.storage.db import StorageClient
+from recut.storage.models import TraceRow
 
 
 class RecutContext:
@@ -58,10 +62,10 @@ def trace(
     agent_id: str = "default",
     mode: TraceMode | str = TraceMode.PEEK,
     language: TraceLanguage | str = TraceLanguage.SIMPLE,
-    provider: Optional[AbstractProvider] = None,
+    provider: AbstractProvider | None = None,
     sample_rate: float = 1.0,
-    trace_if: Optional[Callable[[RecutContext], bool]] = None,
-    flag_handlers: Optional[list[Callable]] = None,
+    trace_if: Callable[[RecutContext], bool] | None = None,
+    flag_handlers: list[Callable] | None = None,
 ) -> Callable:
     """
     Decorator that wraps any async function and captures its agent run as a RecutTrace.
@@ -113,7 +117,7 @@ def trace(
             result = await fn(*args, **kwargs)
 
             ctx.finalize()
-            await _persist_trace(ctx.trace)
+            asyncio.create_task(_persist_trace(ctx.trace))
 
             return result
 
@@ -127,7 +131,7 @@ async def trace_context(
     agent_id: str = "default",
     mode: TraceMode | str = TraceMode.PEEK,
     language: TraceLanguage | str = TraceLanguage.SIMPLE,
-    provider: Optional[AbstractProvider] = None,
+    provider: AbstractProvider | None = None,
 ) -> AsyncIterator[RecutContext]:
     """
     Async context manager alternative to the decorator.
@@ -158,7 +162,7 @@ async def trace_context(
         yield ctx
     finally:
         ctx.finalize()
-        await _persist_trace(ctx.trace)
+        asyncio.create_task(_persist_trace(ctx.trace))
 
 
 def _extract_prompt(args: tuple, kwargs: dict) -> str:
@@ -176,27 +180,27 @@ def _default_provider() -> AbstractProvider:
 
 
 async def _persist_trace(trace: RecutTrace) -> None:
-    """Write the completed trace to SQLite asynchronously."""
-    import json
-    from recut.storage.db import StorageClient
-    from recut.storage.models import TraceRow
-
-    row = TraceRow(
-        id=trace.id,
-        created_at=trace.created_at,
-        agent_id=trace.agent_id,
-        prompt=trace.prompt,
-        mode=trace.mode.value,
-        language=trace.language.value,
-        model=trace.meta.model,
-        provider=trace.meta.provider,
-        duration_seconds=trace.meta.duration_seconds,
-        total_steps=trace.meta.total_steps,
-        token_count=trace.meta.token_count,
-        thinking_tokens=trace.meta.thinking_tokens,
-        steps_json=json.dumps([s.model_dump(mode="json") for s in trace.steps]),
-    )
-
-    loop = asyncio.get_event_loop()
-    client = StorageClient()
-    await loop.run_in_executor(None, client.save_trace_row, row)
+    if is_open():
+        return
+    try:
+        row = TraceRow(
+            id=trace.id,
+            created_at=trace.created_at,
+            agent_id=trace.agent_id,
+            prompt=trace.prompt,
+            mode=trace.mode.value,
+            language=trace.language.value,
+            model=trace.meta.model,
+            provider=trace.meta.provider,
+            duration_seconds=trace.meta.duration_seconds,
+            total_steps=trace.meta.total_steps,
+            token_count=trace.meta.token_count,
+            thinking_tokens=trace.meta.thinking_tokens,
+            steps_json=json.dumps([s.model_dump(mode="json") for s in trace.steps]),
+        )
+        loop = asyncio.get_running_loop()
+        client = StorageClient()
+        await loop.run_in_executor(None, client.save_trace_row, row)
+        record_success()
+    except Exception:  # noqa: BLE001
+        record_failure()

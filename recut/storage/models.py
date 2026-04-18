@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Optional
+from datetime import UTC, datetime
+
 from sqlmodel import Field, SQLModel
 
 
@@ -16,10 +16,10 @@ class TraceRow(SQLModel, table=True):
     language: str
     model: str
     provider: str
-    duration_seconds: Optional[float] = None
+    duration_seconds: float | None = None
     total_steps: int = 0
-    token_count: Optional[int] = None
-    thinking_tokens: Optional[int] = None
+    token_count: int | None = None
+    thinking_tokens: int | None = None
     steps_json: str = ""
 
 
@@ -33,12 +33,12 @@ class AuditRow(SQLModel, table=True):
     created_at: datetime
     behavioral_summary: str
     flag_count: int = 0
-    highest_severity: Optional[str] = None
+    highest_severity: str | None = None
     risk_profile_json: str = "{}"
     review_status: str = "auto"
-    review_notes: Optional[str] = None
-    reviewer: Optional[str] = None
-    exported_at: Optional[datetime] = None
+    review_notes: str | None = None
+    reviewer: str | None = None
+    exported_at: datetime | None = None
 
 
 class ForkRow(SQLModel, table=True):
@@ -51,7 +51,7 @@ class ForkRow(SQLModel, table=True):
     fork_type: str
     injection_json: str
     replay_steps_json: str = "[]"
-    diff_json: Optional[str] = None
+    diff_json: str | None = None
 
 
 class FlagCache(SQLModel, table=True):
@@ -59,5 +59,5 @@ class FlagCache(SQLModel, table=True):
 
     content_hash: str = Field(primary_key=True)
     flags_json: str
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     expires_at: datetime

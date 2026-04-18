@@ -16,12 +16,14 @@ Engineers see the final output, the bill, or an alert. They don't see *why* the 
 
 This is getting worse, not better. Documented failure modes are now well-established:
 
-- **Infinite tool loops.** A Claude Code sub-agent consumed 27M tokens in a single run over 4.6 hours. Zed IDE logged a public case of an agent stuck in "Let me verify…" degeneration. No early warning, no way to pause.
-- **Scope creep that looks reasonable mid-run.** Replit's agent, told not to touch production during a code freeze, executed `DROP DATABASE` after a sequence of "individually reasonable" decisions. The reasoning chain looked fine at each step.
-- **Silent failures.** Agents return partial answers or loop on the same tool call without surfacing errors. The first visible signal is often the token bill.
+- **Infinite tool loops.** A Claude Code sub-agent consumed 27M tokens in a single run over 4.6 hours. Zed IDE logged a public case of an agent stuck in "Let me verify…" degeneration. A developer on dev.to described their agent firing 50,000 API requests before anyone noticed. No early warning, no way to pause.
+- **Irreversible actions with no review gate.** Replit's agent, told not to touch production during a code freeze, executed `DROP DATABASE` after a sequence of "individually reasonable" decisions. Amazon's Kiro agent autonomously deleted a production AWS environment, causing a 13-hour outage. The reasoning chain looked fine at each step.
+- **Silent cascade failures.** Agents return partial answers or loop on the same tool call without surfacing errors. In one documented case, an agent interpreted an empty API response as success while the DB connection pool was exhausted — processing 500+ transactions on incomplete data before detection. Logs showed "decision: approved" with no reasoning.
 - **Schema drift.** A dependency upgrade changed tool schema generation silently and broke production agents at multiple companies simultaneously. Nobody could reconstruct what the agent had been doing before the break.
 
-The common thread: **no structured trace, no replay, no intercept.** Builders can't reconstruct the agent's decision path after the fact — and they can't pause it before it does something irreversible.
+The scale is confirmed: IDC research shows 92% of businesses implementing agentic AI experience cost overruns; 87% of those stem from granting too much autonomy without review gates. AICosts.ai found 73% of teams are "one prompt away from a budget disaster." Galileo's analysis puts inference at only 20% of agentic AI TCO — the rest is governance, oversight, and recovery.
+
+The common thread: **no structured trace, no replay, no gate before action.** Builders can't reconstruct the agent's decision path after the fact — and they can't intercept it before it does something irreversible. As one field report put it: *"logging outputs without reasoning fails every major compliance framework."*
 
 ---
 
@@ -53,10 +55,11 @@ OWASP published the *Top 10 for Agentic Applications* (Dec 2025). MITRE ATLAS ad
 | **Arize Phoenix** | ML observability, traces + evals | No | No | No | No |
 | **Weights & Biases Weave** | Experiment tracking + LLM traces | No | No | No | No |
 | **Braintrust** | Evaluation platform | No | No | No | No |
+| **Fiddler AI** | Model monitoring + LLM guardrails | No | No | No | Partial |
 | **Portkey** | API gateway, routing + caching | No | No | No | No |
 | **recut-ai** | Intercept, replay, audit | **Yes (Claude native)** | **Yes** | **Yes** | **Yes** |
 
-**The gap:** Every existing tool is an *observer*. They log what happened after the fact. None of them let you fork a run from a specific step, pause mid-execution, or capture and compare the agent's reasoning against its actions. recut is the first tool in this space built as a *debugger*, not a dashboard.
+**The gap:** Every existing tool is an *observer* — including Fiddler, which has the most sophisticated LLM monitoring of the group. They log and alert on what happened. None of them let you fork a run from a specific step, gate an action pending review, or capture and compare the agent's reasoning against its actions. recut is the first tool in this space built as a *debugger and control layer*, not a dashboard. And critically, recut feeds into all of them — adding the reasoning and behavioral signal layer they're missing.
 
 ---
 
@@ -87,8 +90,8 @@ Not another dashboard. A debugging primitive. Intercept the run, fork from the m
 **"See what your agent was actually thinking."**
 For Claude users: native reasoning block capture shows you the internal deliberation before each action. Flag the gap between what the agent thought and what it did.
 
-**"Human-on-the-loop, not human-in-the-way."**
-Compliance and governance without blocking your agent on every step. Intercept fires only when behavioral flags cross your threshold. Everything else runs uninterrupted.
+**"Gate the actions that matter. Let everything else run."**
+Not every agent step needs a reviewer. Intercept fires only when behavioral flags cross your threshold — on high-severity tool calls, scope creep, or confidence mismatches. Everything else runs at full speed. Your agent isn't slower; it's just accountable where it counts.
 
 **"Stress test before your users do."**
 Auto-generate adversarial variants from flagged steps. Find the edge cases that break your agent's reasoning before they hit production.
@@ -103,8 +106,8 @@ Agent failed mid-run. Load the trace, peek at high-risk steps, find the divergen
 **Pre-release audit**
 Before shipping a new agent version, run audit mode on a representative trace set. Get a structured AuditRecord with risk profile, flag counts, and behavioral summary. Export as `.recut.json` for your compliance record.
 
-**HITL gate for irreversible actions**
-Register an `on_flag` hook that fires before any tool call above `HIGH` severity. Pause the agent, surface the flag to a human reviewer, resume or redirect. Meets EU AI Act Article 14 oversight requirements without redesigning your agent.
+**Action review gate for irreversible decisions**
+Register an `on_flag` hook that fires before any tool call above `HIGH` severity — database writes, external API calls, file deletions. Pause the run, surface the reasoning and flag context to a reviewer, then resume or redirect. Structured decision provenance is recorded automatically. Meets EU AI Act Article 14 and NIST AI RMF oversight requirements without redesigning your agent.
 
 **Red team / stress testing**
 Take a trace where a high-risk flag fired. Run stress mode with 5 variants — auto-generated with amplified uncertainty, contradicted tool results, or adversarial inputs. Get a stability verdict per variant. Know whether your agent's reasoning holds under pressure before your attacker finds out it doesn't.
@@ -129,9 +132,10 @@ recut wraps your agent at the function level. One decorator. It is additive.
 
 The conditions are right now:
 
-1. Agentic failures are public and documented — the pain is real and visible.
-2. Regulatory pressure (EU AI Act, NIST AI RMF) is creating a compliance pull, not just a developer pull.
-3. Claude's extended thinking API is new — native reasoning capture is only possible because Anthropic exposed it. The window to be first in this space is open.
-4. The "AI engineer" persona has consolidated — there are now millions of product engineers building with LLM APIs who aren't served by ML observability tools.
+1. **Agentic failures are public and quantified.** 92% of businesses report cost overruns from agentic AI. 73% of teams self-report being "one prompt away from a budget disaster." The pain is real, visible, and getting press.
+2. **Regulatory pressure is creating a compliance pull.** EU AI Act Article 14, NIST AI RMF, SOC 2, HIPAA, and ISO 27001 auditors are now asking about agent decision provenance. IBM frames this as the need for "agent decision records (ADRs)" — structured logs of *why* an agent acted, not just *what* it did. recut produces exactly this.
+3. **Claude's extended thinking API is a narrow window.** Native reasoning capture is only possible because Anthropic exposed thinking blocks. No other tool in the market captures them. That window won't stay open indefinitely.
+4. **The "AI engineer" persona is now mainstream.** SF Standard declared "engineer is so 2025 — in AI land, everyone's a builder now." Gartner projects 40% of enterprise apps will have embedded agents by 2026. Most builders are not ML engineers; none of the existing ML observability tools are built for them.
+5. **Existing platforms are observer-only.** Even Fiddler — the most capable LLM monitoring platform — has no replay, no pre-action gate, no reasoning trace export. The market is wide open for a tool that acts as a *control layer*, not just a dashboard.
 
 The observability tools that exist were built when LLMs were stateless chat. Agents are stateful, multi-step, and capable of irreversible actions. The tooling hasn't caught up.

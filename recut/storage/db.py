@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import os
+from datetime import UTC
 from pathlib import Path
-from typing import Optional
 
 from sqlmodel import Session, SQLModel, create_engine
 
@@ -32,7 +32,7 @@ def get_session() -> Session:
 
 
 class StorageClient:
-    def __init__(self, session: Optional[Session] = None):
+    def __init__(self, session: Session | None = None):
         self._session = session
 
     def _get_session(self) -> Session:
@@ -43,7 +43,7 @@ class StorageClient:
             session.merge(row)
             session.commit()
 
-    def get_trace_row(self, trace_id: str) -> Optional[TraceRow]:
+    def get_trace_row(self, trace_id: str) -> TraceRow | None:
         with self._get_session() as session:
             return session.get(TraceRow, trace_id)
 
@@ -52,7 +52,7 @@ class StorageClient:
             session.merge(row)
             session.commit()
 
-    def get_audit_row(self, audit_id: str) -> Optional[AuditRow]:
+    def get_audit_row(self, audit_id: str) -> AuditRow | None:
         with self._get_session() as session:
             return session.get(AuditRow, audit_id)
 
@@ -61,15 +61,15 @@ class StorageClient:
             session.merge(row)
             session.commit()
 
-    def get_fork_row(self, fork_id: str) -> Optional[ForkRow]:
+    def get_fork_row(self, fork_id: str) -> ForkRow | None:
         with self._get_session() as session:
             return session.get(ForkRow, fork_id)
 
-    def get_cached_flags(self, content_hash: str) -> Optional[FlagCache]:
+    def get_cached_flags(self, content_hash: str) -> FlagCache | None:
         from datetime import datetime
         with self._get_session() as session:
             row = session.get(FlagCache, content_hash)
-            if row and row.expires_at > datetime.utcnow():
+            if row and row.expires_at > datetime.now(UTC):
                 return row
             return None
 

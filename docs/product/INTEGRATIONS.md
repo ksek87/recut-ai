@@ -204,6 +204,60 @@ Uses PagerDuty Events API v2. Dedup key = `trace_id:step_id` so repeat flags on 
 
 ---
 
+## Fiddler AI
+
+Fiddler positions itself as an "AI Control Plane for Enterprise Agents" with LLM guardrails, 50+ out-of-the-box metrics (hallucination, toxicity, PII, prompt injection), and hierarchical tracing across full agent lifecycles. It has the most sophisticated monitoring surface of any tool in this space — but it is still an observer. It has no replay, no pre-action review gate, and no structured reasoning trace export. recut fills all three gaps and feeds enriched data back into Fiddler's monitoring layer.
+
+**What recut adds to Fiddler:**
+- Behavioral flag scores as custom columns in Fiddler event rows (risk_score, flag_type, flag_severity, plain_reason)
+- Reasoning trace hash — a structural fingerprint of the agent's thinking chain, useful for drift detection across runs
+- Loop detection counts and irreversible action flags as Fiddler custom KPIs
+- Replay fork metadata — when a run was replayed from a fork point, Fiddler sees both the original and the fork as linked events
+
+**Integration model:**
+
+Fiddler's Python SDK (`fiddler-client`) ingests events via `Model.publish()` as structured rows. recut serializes its trace output as custom columns alongside the standard prompt/response payload. This is the same pattern Fiddler uses for custom evaluation scores from their Evals SDK.
+
+```python
+import fiddler as fdl
+from recut.integrations.fiddler import FiddlerExporter
+
+recut.configure(
+    exporters=[
+        FiddlerExporter(
+            url=os.environ["FIDDLER_URL"],
+            token=os.environ["FIDDLER_TOKEN"],
+            project="my-agent-project",
+            model="my-agent-v1",
+        )
+    ]
+)
+```
+
+**What it publishes per trace:**
+
+```python
+# Each RecutTrace becomes a Fiddler event row with these custom columns:
+{
+    "prompt": trace.prompt,
+    "output": trace.steps[-1].content,
+    "recut_risk_score": trace.risk_score,          # 0.0–1.0
+    "recut_flag_count": len(trace.flags),
+    "recut_highest_severity": trace.highest_severity,
+    "recut_flags": json.dumps([f.type for f in trace.flags]),
+    "recut_reasoning_source": trace.meta.reasoning_source,  # native | inferred
+    "recut_loop_detected": any(f.type == "reasoning_loop" for f in trace.flags),
+    "recut_irreversible_action": any(f.type == "anomalous_tool_use" for f in trace.flags),
+    "recut_trace_id": trace.id,                    # link back to recut for replay
+}
+```
+
+**Result:** Fiddler dashboards show your existing LLM metrics (hallucination, toxicity, latency) alongside recut behavioral signals in the same row. You can alert on `recut_risk_score > 0.8` alongside Fiddler's own guardrails. The `recut_trace_id` column lets reviewers jump from a Fiddler alert directly into `recut audit <trace-id>` for full replay and inspection.
+
+**OTel path (alternative):** Fiddler also supports OTLP ingestion via its framework instrumentors. Since recut already emits OTel spans, zero additional config is needed for Fiddler environments that are already OTel-wired — recut spans appear in Fiddler's trace hierarchy automatically. The `FiddlerExporter` above adds the structured custom columns that OTel spans alone don't carry.
+
+---
+
 ## Generic Webhook
 
 For any system not listed above:
@@ -230,13 +284,14 @@ Payload is the serialized `RecutFlagEvent` or `RecutTrace` as JSON. Retries on 5
 
 | Integration | Why | Phase |
 |-------------|-----|-------|
-| OpenTelemetry | Universal foundation — unlocks Datadog, Phoenix, Honeycomb, Grafana for free | v0.5 |
-| LangSmith | Largest existing user base for LLM tracing | v0.5 |
-| Langfuse | Open-source, growing fast, scores API is a perfect fit | v0.5 |
-| Slack | Fastest path to real-time alerting for any team | v0.5 |
+| OpenTelemetry | Universal foundation — unlocks Datadog, Phoenix, Honeycomb, Grafana for free | v0.6 |
+| LangSmith | Largest existing user base for LLM tracing | v0.6 |
+| Langfuse | Open-source, growing fast, scores API is a perfect fit | v0.6 |
+| Slack | Fastest path to real-time alerting for any team | v0.6 |
+| Generic Webhook | Long tail of internal systems | v0.6 |
+| Fiddler AI | Enterprise AI control plane — custom column ingestion via fiddler-client | v0.6 |
 | W&B Weave | Strong fit for stress mode / experiment tracking | v0.6 |
-| PagerDuty | Enterprise / on-call workflows | v0.6 |
-| Generic Webhook | Long tail of internal systems | v0.5 |
+| PagerDuty | Enterprise / on-call workflows | v0.7 |
 
 ---
 
@@ -247,6 +302,7 @@ Payload is the serialized `RecutFlagEvent` or `RecutTrace` as JSON. Retries on 5
 | LangSmith | Reasoning content in step outputs + flag scores as feedback |
 | Langfuse | Behavioral scores (flag types) + plain-language reasons |
 | W&B Weave | Risk metrics per run + stress variant comparison tables |
+| Fiddler AI | Behavioral flags + risk scores as custom event columns; reasoning hash for drift detection |
 | Arize Phoenix | Native OTel spans with reasoning attributes + flag events |
 | Datadog / Honeycomb | OTel spans enriched with behavioral signals |
 | Slack / PagerDuty | Real-time high-severity flag alerts with plain-language context |

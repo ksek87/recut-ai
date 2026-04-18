@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -24,11 +23,11 @@ def run(
 
 
 async def _run_async(prompt: str, agent_id: str, mode: str, language: str, model: str) -> None:
-    from recut.providers.anthropic import AnthropicProvider
+    from recut.core.auditor import audit, peek
     from recut.core.tracer import trace_context
-    from recut.schema.trace import TraceMode, TraceLanguage
-    from recut.core.auditor import peek, audit
     from recut.plain.summariser import summarise_step
+    from recut.providers.anthropic import AnthropicProvider
+    from recut.schema.trace import TraceMode
 
     provider = AnthropicProvider(model=model)
 
@@ -36,7 +35,7 @@ async def _run_async(prompt: str, agent_id: str, mode: str, language: str, model
         _mode = TraceMode(mode)
     except ValueError:
         console.print(f"[red]Unknown mode: {mode}. Use peek, audit, or intercept.[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     console.print(Panel(f"[bold]Agent:[/bold] {agent_id}  [bold]Mode:[/bold] {mode}\n[bold]Prompt:[/bold] {prompt}", title="recut run"))
 

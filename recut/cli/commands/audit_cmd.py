@@ -13,16 +13,19 @@ console = Console()
 @app.callback(invoke_without_command=True)
 def audit_cmd(
     trace_id: str = typer.Argument(..., help="Trace ID to audit"),
+    tui: bool = typer.Option(False, "--tui", help="Launch interactive TUI"),
 ) -> None:
     """Full audit — all four flagging layers, full AuditRecord output."""
-    asyncio.run(_audit_async(trace_id))
+    asyncio.run(_audit_async(trace_id, tui=tui))
 
 
-async def _audit_async(trace_id: str) -> None:
-    from recut.storage.db import StorageClient
-    from recut.schema.trace import RecutTrace, RecutStep, TraceMeta, TraceMode, TraceLanguage
-    from recut.core.auditor import audit
+async def _audit_async(trace_id: str, *, tui: bool = False) -> None:
     import json
+
+    from recut.cli.tui.audit_view import AuditView
+    from recut.core.auditor import audit
+    from recut.schema.trace import RecutStep, RecutTrace, TraceLanguage, TraceMeta, TraceMode
+    from recut.storage.db import StorageClient
 
     client = StorageClient()
     row = client.get_trace_row(trace_id)
@@ -43,6 +46,10 @@ async def _audit_async(trace_id: str) -> None:
     )
 
     record = await audit(trace)
+
+    if tui:
+        AuditView(trace, record).run()
+        return
 
     console.print(Panel(
         f"[bold]Summary:[/bold] {record.behavioral_summary}\n\n"

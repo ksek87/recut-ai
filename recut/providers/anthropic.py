@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import os
 import uuid
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 import anthropic
 
+from recut.providers.base import AbstractProvider
 from recut.schema.trace import (
-    RecutStep,
     ReasoningSource,
+    RecutStep,
     StepReasoning,
     StepType,
 )
-from recut.providers.base import AbstractProvider
 
 
 class AnthropicProvider(AbstractProvider):
@@ -42,7 +42,10 @@ class AnthropicProvider(AbstractProvider):
         """Parse a raw response dict into a RecutStep (used for offline replay)."""
         content = raw_response.get("content", "")
         step_type_str = raw_response.get("type", "output")
-        step_type = StepType(step_type_str) if step_type_str in StepType._value2member_map_ else StepType.OUTPUT
+        try:
+            step_type = StepType(step_type_str)
+        except ValueError:
+            step_type = StepType.OUTPUT
 
         reasoning = None
         if "reasoning" in raw_response:
@@ -139,7 +142,6 @@ class AnthropicProvider(AbstractProvider):
         Reconstruct messages up to fork_index, inject modified content,
         then continue the run from that point.
         """
-        import json
 
         messages = _steps_to_messages(steps[:fork_index], injection)
         prompt = messages[-1]["content"] if messages else ""

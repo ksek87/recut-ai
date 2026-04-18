@@ -13,16 +13,19 @@ console = Console()
 @app.callback(invoke_without_command=True)
 def peek_cmd(
     trace_id: str = typer.Argument(..., help="Trace ID to peek at"),
+    tui: bool = typer.Option(False, "--tui", help="Launch interactive TUI"),
 ) -> None:
     """Fast triage — surfaces high-risk steps without a full audit."""
-    asyncio.run(_peek_async(trace_id))
+    asyncio.run(_peek_async(trace_id, tui=tui))
 
 
-async def _peek_async(trace_id: str) -> None:
-    from recut.storage.db import StorageClient
-    from recut.schema.trace import RecutTrace, RecutStep, TraceMeta, TraceMode, TraceLanguage
-    from recut.core.auditor import peek
+async def _peek_async(trace_id: str, *, tui: bool = False) -> None:
     import json
+
+    from recut.cli.tui.peek_view import PeekView
+    from recut.core.auditor import peek
+    from recut.schema.trace import RecutStep, RecutTrace, TraceLanguage, TraceMeta, TraceMode
+    from recut.storage.db import StorageClient
 
     client = StorageClient()
     row = client.get_trace_row(trace_id)
@@ -44,6 +47,10 @@ async def _peek_async(trace_id: str) -> None:
 
     record = await peek(trace)
 
+    if tui:
+        PeekView(trace, record).run()
+        return
+
     console.print(f"\n[bold]Peek:[/bold] {record.behavioral_summary}")
 
     flagged = [s for s in trace.steps if s.flags]
@@ -62,10 +69,10 @@ async def _peek_async(trace_id: str) -> None:
         for flag in step.flags:
             table.add_row(
                 str(step.index),
-                step.type.value,
-                flag.type.value,
-                f"[red]{flag.severity.value}[/red]" if flag.severity.value == "high"
-                else f"[yellow]{flag.severity.value}[/yellow]",
+                str(step.type),
+                str(flag.type),
+                f"[red]{flag.severity}[/red]" if flag.severity == "high"
+                else f"[yellow]{flag.severity}[/yellow]",
                 flag.plain_reason[:80],
             )
 

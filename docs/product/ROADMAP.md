@@ -2,6 +2,8 @@
 
 **Current:** `v0.1` in progress
 
+> **Plan alignment:** v0.1–v0.5 map directly to Phases 1–5 in [RECUT_PLAN.md](RECUT_PLAN.md). v0.6–v0.8 are additions beyond the original build spec: integrations, production hardening, and enterprise features developed in response to market research. The build order within each version follows the phase notes in RECUT_PLAN.md.
+
 ---
 
 ## v0.1 — Foundation
@@ -51,15 +53,16 @@ Recut enriches existing tools — it does not replace them. See [INTEGRATIONS.md
 - [ ] OpenTelemetry exporter — spans + flag events, unlocks Datadog, Phoenix, Honeycomb, Grafana
 - [ ] LangSmith adapter — reasoning content + flag scores as LangSmith feedback
 - [ ] Langfuse adapter — behavioral scores + plain-language reasons via scoring API
+- [ ] Fiddler AI adapter — behavioral flags + risk scores as custom event columns via `fiddler-client`
+- [ ] W&B Weave adapter — risk metrics + stress variant comparison tables
 - [ ] Slack alerter — `on_flag` hook, high-severity flag notifications
 - [ ] Generic webhook exporter — HTTP push for internal systems
-- [ ] W&B Weave adapter — risk metrics + stress variant comparison tables
-- [ ] PagerDuty alerter — production on-call integration with dedup
 
 ## v0.7 — Production Hardening
 
 See [ENTERPRISE.md](ENTERPRISE.md) for full detail.
 
+- [ ] PagerDuty alerter — production on-call integration with dedup
 - [ ] PII & secret scrubber — runs in-process before any write or export
 - [ ] Reasoning block sensitivity controls (`store_native`, `export_native`, `truncate_native_at`)
 - [ ] Trace integrity sealing — SHA-256 content hash, tamper-evident audit records
