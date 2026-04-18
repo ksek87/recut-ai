@@ -46,6 +46,9 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.10",
     "pytest-cov>=5.0",
+    "pylint>=3.0",
+    "bandit[toml]>=1.7",
+    "pip-audit>=2.7",
 ]
 
 [project.urls]
@@ -73,3 +76,29 @@ ignore_missing_imports = true
 asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "--tb=short"
+
+[tool.pylint.main]
+fail-under = 8.0
+generated-members = [
+    "model_fields",
+    "model_config",
+    "model_dump",
+    "model_validate",
+    "model_validate_json",
+    "model_dump_json",
+]
+
+[tool.pylint.format]
+max-line-length = 100
+
+[tool.pylint."messages control"]
+disable = [
+    "C0114",  # missing-module-docstring
+    "C0115",  # missing-class-docstring
+    "C0116",  # missing-function-docstring
+]
+
+[tool.bandit]
+targets = ["recut"]
+severity = "medium"
+confidence = "medium"
