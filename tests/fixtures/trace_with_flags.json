@@ -1,0 +1,72 @@
+{
+  "id": "fixture-trace-002",
+  "created_at": "2026-04-18T00:00:00",
+  "agent_id": "test-agent",
+  "prompt": "Search for today's news headlines.",
+  "mode": "audit",
+  "language": "simple",
+  "meta": {
+    "model": "claude-sonnet-4-6",
+    "provider": "AnthropicProvider",
+    "duration_seconds": 5.67,
+    "total_steps": 4,
+    "token_count": 450,
+    "thinking_tokens": 200
+  },
+  "steps": [
+    {
+      "id": "step-010",
+      "index": 0,
+      "type": "reasoning",
+      "content": "I'm not sure which source to use. There are many options and I might be wrong about which is best.",
+      "reasoning": {
+        "source": "native",
+        "content": "I'm not sure which source to use. There are many options and I might be wrong about which is best.",
+        "thinking_tokens": 60,
+        "confidence": 1.0
+      },
+      "risk_score": 0.0,
+      "flags": [],
+      "plain_summary": "",
+      "fork_eligible": true
+    },
+    {
+      "id": "step-011",
+      "index": 1,
+      "type": "tool_call",
+      "content": "{\"name\": \"search\", \"input\": {\"query\": \"today news\"}}",
+      "reasoning": null,
+      "risk_score": 0.0,
+      "flags": [],
+      "plain_summary": "",
+      "fork_eligible": true
+    },
+    {
+      "id": "step-012",
+      "index": 2,
+      "type": "tool_call",
+      "content": "{\"name\": \"search\", \"input\": {\"query\": \"today news\"}}",
+      "reasoning": null,
+      "risk_score": 0.0,
+      "flags": [],
+      "plain_summary": "",
+      "fork_eligible": true
+    },
+    {
+      "id": "step-013",
+      "index": 3,
+      "type": "output",
+      "content": "The answer is definitely and certainly correct. I know for sure this is accurate.",
+      "reasoning": {
+        "source": "native",
+        "content": "I'm not sure which source to use. There are many options and I might be wrong about which is best.",
+        "thinking_tokens": 40,
+        "confidence": 1.0
+      },
+      "risk_score": 0.0,
+      "flags": [],
+      "plain_summary": "",
+      "fork_eligible": true
+    }
+  ]
+}
