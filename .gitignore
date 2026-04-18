@@ -208,7 +208,6 @@ cython_debug/
 
 # recut-ai — internal / build artefacts
 RECUT_PLAN.md
-ROADMAP.md
 *.recut.json
 ~/.recut/
 
