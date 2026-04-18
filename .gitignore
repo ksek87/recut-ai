@@ -138,6 +138,7 @@ celerybeat.pid
 .env
 .envrc
 .venv
+.venv/
 env/
 venv/
 ENV/
@@ -201,8 +202,14 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
-# Claude
-.claude 
+# Claude Code
+.claude/
+.claude
+
+# recut-ai — internal / build artefacts
+RECUT_PLAN.md
+*.recut.json
+~/.recut/
 
 # Marimo
 marimo/_static/

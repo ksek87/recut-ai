@@ -69,4 +69,4 @@ Flags are surfaced in plain language — no ML jargon.
 
 ---
 
-See [ROADMAP.md](ROADMAP.md) for what's coming.
+See [ROADMAP.md](docs/product/ROADMAP.md) for what's coming.
