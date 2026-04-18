@@ -1,0 +1,45 @@
+{
+  "id": "fixture-trace-001",
+  "created_at": "2026-04-18T00:00:00",
+  "agent_id": "test-agent",
+  "prompt": "What is the capital of France?",
+  "mode": "peek",
+  "language": "simple",
+  "meta": {
+    "model": "claude-sonnet-4-6",
+    "provider": "AnthropicProvider",
+    "duration_seconds": 1.23,
+    "total_steps": 3,
+    "token_count": 120,
+    "thinking_tokens": 80
+  },
+  "steps": [
+    {
+      "id": "step-001",
+      "index": 0,
+      "type": "reasoning",
+      "content": "The user is asking about the capital of France. This is straightforward geography — the answer is Paris.",
+      "reasoning": {
+        "source": "native",
+        "content": "The user is asking about the capital of France. This is straightforward geography — the answer is Paris.",
+        "thinking_tokens": 40,
+        "confidence": 1.0
+      },
+      "risk_score": 0.0,
+      "flags": [],
+      "plain_summary": "",
+      "fork_eligible": true
+    },
+    {
+      "id": "step-002",
+      "index": 1,
+      "type": "output",
+      "content": "The capital of France is Paris.",
+      "reasoning": null,
+      "risk_score": 0.0,
+      "flags": [],
+      "plain_summary": "",
+      "fork_eligible": true
+    }
+  ]
+}
