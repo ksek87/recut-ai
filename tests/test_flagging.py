@@ -3,36 +3,33 @@ Tests for the flagging engine in recut/flagging/engine.py.
 No live API calls — only layers 1 and 3 are tested here.
 Layer 4 (LLM judge) is never invoked.
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 
-import pytest
-
 from recut.flagging.engine import (
     FlaggingEngine,
     _cache_key,
-    _cache_flags,
-    _get_cached_flags,
     _layer1_rules,
     _layer3_native_mismatch,
 )
 from recut.schema.trace import (
     FlagSource,
     FlagType,
+    ReasoningSource,
     RecutFlag,
     RecutStep,
-    ReasoningSource,
     Severity,
     StepReasoning,
     StepType,
     TraceMode,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_step(
     index: int,
@@ -63,8 +60,8 @@ def _make_step(
 # Layer 1 — Rule-based
 # ===========================================================================
 
-class TestLayer1Rules:
 
+class TestLayer1Rules:
     def test_repeated_identical_tool_call_flags_high(self):
         """Repeated tool call with identical content -> anomalous_tool_use HIGH."""
         content = '{"name": "search", "input": {"query": "news"}}'
@@ -74,7 +71,11 @@ class TestLayer1Rules:
         flags = _layer1_rules(step, preceding)
 
         assert len(flags) >= 1
-        repeated_flags = [f for f in flags if f.type == FlagType.ANOMALOUS_TOOL_USE and f.severity == Severity.HIGH]
+        repeated_flags = [
+            f
+            for f in flags
+            if f.type == FlagType.ANOMALOUS_TOOL_USE and f.severity == Severity.HIGH
+        ]
         assert len(repeated_flags) == 1
         assert repeated_flags[0].source == FlagSource.RULE
         assert repeated_flags[0].step_id == step.id
@@ -86,7 +87,11 @@ class TestLayer1Rules:
 
         flags = _layer1_rules(step, preceding)
 
-        repeated_flags = [f for f in flags if f.type == FlagType.ANOMALOUS_TOOL_USE and f.severity == Severity.HIGH]
+        repeated_flags = [
+            f
+            for f in flags
+            if f.type == FlagType.ANOMALOUS_TOOL_USE and f.severity == Severity.HIGH
+        ]
         assert len(repeated_flags) == 0
 
     def test_tool_call_with_no_preceding_reasoning_flags_low(self):
@@ -98,8 +103,7 @@ class TestLayer1Rules:
         flags = _layer1_rules(step, preceding)
 
         low_flags = [
-            f for f in flags
-            if f.type == FlagType.ANOMALOUS_TOOL_USE and f.severity == Severity.LOW
+            f for f in flags if f.type == FlagType.ANOMALOUS_TOOL_USE and f.severity == Severity.LOW
         ]
         assert len(low_flags) == 1
 
@@ -111,8 +115,7 @@ class TestLayer1Rules:
         flags = _layer1_rules(step, preceding)
 
         low_no_reasoning = [
-            f for f in flags
-            if f.type == FlagType.ANOMALOUS_TOOL_USE and f.severity == Severity.LOW
+            f for f in flags if f.type == FlagType.ANOMALOUS_TOOL_USE and f.severity == Severity.LOW
         ]
         assert len(low_no_reasoning) == 0
 
@@ -127,7 +130,9 @@ class TestLayer1Rules:
 
         flags = _layer1_rules(step, [])
 
-        gap_flags = [f for f in flags if f.type == FlagType.REASONING_GAP and f.severity == Severity.MEDIUM]
+        gap_flags = [
+            f for f in flags if f.type == FlagType.REASONING_GAP and f.severity == Severity.MEDIUM
+        ]
         assert len(gap_flags) == 1
         assert gap_flags[0].source == FlagSource.RULE
 
@@ -168,7 +173,9 @@ class TestLayer1Rules:
     def test_normal_step_no_issues_returns_empty(self):
         """A clean reasoning step with proper context should return no flags."""
         preceding = [_make_step(0, StepType.REASONING, "Let me think through this.")]
-        step = _make_step(1, StepType.OUTPUT, "The answer is Paris.", reasoning_content="Paris is the capital.")
+        step = _make_step(
+            1, StepType.OUTPUT, "The answer is Paris.", reasoning_content="Paris is the capital."
+        )
 
         flags = _layer1_rules(step, preceding)
 
@@ -188,8 +195,8 @@ class TestLayer1Rules:
 # Layer 3 — Native reasoning/action mismatch
 # ===========================================================================
 
-class TestLayer3NativeMismatch:
 
+class TestLayer3NativeMismatch:
     def test_uncertainty_in_thinking_confidence_in_output_flags_high(self):
         """Native reasoning with uncertainty phrases + output with confidence phrases -> HIGH mismatch."""
         step = _make_step(
@@ -276,7 +283,7 @@ class TestLayer3NativeMismatch:
 
     def test_each_uncertainty_phrase_triggers(self):
         """Spot-check that each uncertainty phrase can trigger the flag."""
-        from recut.flagging.flags import UNCERTAINTY_PHRASES, CONFIDENCE_PHRASES
+        from recut.flagging.flags import CONFIDENCE_PHRASES, UNCERTAINTY_PHRASES
 
         # Use first confidence phrase for the output
         conf_phrase = CONFIDENCE_PHRASES[0]
@@ -312,8 +319,8 @@ class TestLayer3NativeMismatch:
 # Flag caching
 # ===========================================================================
 
-class TestFlagCaching:
 
+class TestFlagCaching:
     async def test_same_content_twice_second_call_returns_cached(self):
         """
         When _get_cached_flags returns a non-None result, score_step should
@@ -321,7 +328,7 @@ class TestFlagCaching:
         """
         step = _make_step(0, StepType.OUTPUT, "Repeated content.")
         preceding: list[RecutStep] = []
-        key = _cache_key(step, preceding)
+        _cache_key(step, preceding)
 
         cached_flag = RecutFlag(
             type=FlagType.GOAL_DRIFT,
@@ -333,8 +340,12 @@ class TestFlagCaching:
 
         engine = FlaggingEngine(mode=TraceMode.PEEK, use_embeddings=False, use_llm_judge=False)
 
-        with patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=[cached_flag])) as mock_get, \
-             patch("recut.flagging.engine._cache_flags", new=AsyncMock()) as mock_set:
+        with (
+            patch(
+                "recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=[cached_flag])
+            ) as mock_get,
+            patch("recut.flagging.engine._cache_flags", new=AsyncMock()) as mock_set,
+        ):
             result = await engine.score_step(step, preceding, "original prompt")
 
         assert result == [cached_flag]
@@ -352,12 +363,16 @@ class TestFlagCaching:
 
         engine = FlaggingEngine(mode=TraceMode.PEEK, use_embeddings=False, use_llm_judge=False)
 
-        with patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=None)), \
-             patch("recut.flagging.engine._cache_flags", new=AsyncMock()) as mock_set:
+        with (
+            patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=None)),
+            patch("recut.flagging.engine._cache_flags", new=AsyncMock()) as mock_set,
+        ):
             result = await engine.score_step(step, preceding_with_tool, "prompt")
 
         # Should have flagged the repeated tool call
-        assert any(f.type == FlagType.ANOMALOUS_TOOL_USE and f.severity == Severity.HIGH for f in result)
+        assert any(
+            f.type == FlagType.ANOMALOUS_TOOL_USE and f.severity == Severity.HIGH for f in result
+        )
         # Cache should be written
         mock_set.assert_called_once()
 
@@ -366,8 +381,8 @@ class TestFlagCaching:
 # FlaggingEngine integration (layers 1+3 only)
 # ===========================================================================
 
-class TestFlaggingEngineIntegration:
 
+class TestFlaggingEngineIntegration:
     async def test_score_step_layer1_repeated_tool_call(self):
         """FlaggingEngine.score_step fires layer 1 for repeated tool call."""
         content = '{"name": "fetch", "url": "http://example.com"}'
@@ -376,11 +391,15 @@ class TestFlaggingEngineIntegration:
 
         engine = FlaggingEngine(mode=TraceMode.PEEK, use_embeddings=False, use_llm_judge=False)
 
-        with patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=None)), \
-             patch("recut.flagging.engine._cache_flags", new=AsyncMock()):
+        with (
+            patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=None)),
+            patch("recut.flagging.engine._cache_flags", new=AsyncMock()),
+        ):
             flags = await engine.score_step(step, preceding, "do something")
 
-        assert any(f.type == FlagType.ANOMALOUS_TOOL_USE and f.severity == Severity.HIGH for f in flags)
+        assert any(
+            f.type == FlagType.ANOMALOUS_TOOL_USE and f.severity == Severity.HIGH for f in flags
+        )
 
     async def test_score_step_layer3_mismatch(self):
         """FlaggingEngine.score_step fires layer 3 when native mismatch is present."""
@@ -393,8 +412,10 @@ class TestFlaggingEngineIntegration:
 
         engine = FlaggingEngine(mode=TraceMode.PEEK, use_embeddings=False, use_llm_judge=False)
 
-        with patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=None)), \
-             patch("recut.flagging.engine._cache_flags", new=AsyncMock()):
+        with (
+            patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=None)),
+            patch("recut.flagging.engine._cache_flags", new=AsyncMock()),
+        ):
             flags = await engine.score_step(step, [], "original")
 
         assert any(f.type == FlagType.REASONING_ACTION_MISMATCH for f in flags)
@@ -410,8 +431,10 @@ class TestFlaggingEngineIntegration:
 
         engine = FlaggingEngine(mode=TraceMode.PEEK, use_embeddings=False, use_llm_judge=False)
 
-        with patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=None)), \
-             patch("recut.flagging.engine._cache_flags", new=AsyncMock()):
+        with (
+            patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=None)),
+            patch("recut.flagging.engine._cache_flags", new=AsyncMock()),
+        ):
             flags = await engine.score_step(step, [], "What is the capital of France?")
 
         assert flags == []
@@ -426,15 +449,18 @@ class TestFlaggingEngineIntegration:
 
         engine = FlaggingEngine(mode=TraceMode.PEEK, use_embeddings=False, use_llm_judge=False)
 
-        with patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=None)), \
-             patch("recut.flagging.engine._cache_flags", new=AsyncMock()):
+        with (
+            patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=None)),
+            patch("recut.flagging.engine._cache_flags", new=AsyncMock()),
+        ):
             results = await engine.score_batch(steps, "search for something")
 
         # step 0 may get a LOW no-preceding-reasoning flag
         # step 1 should get the HIGH repeated tool call flag
         assert steps[1].id in results
         high_flags = [
-            f for f in results[steps[1].id]
+            f
+            for f in results[steps[1].id]
             if f.type == FlagType.ANOMALOUS_TOOL_USE and f.severity == Severity.HIGH
         ]
         assert len(high_flags) == 1

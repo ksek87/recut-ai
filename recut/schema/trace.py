@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
@@ -15,8 +15,8 @@ class StepType(StrEnum):
 
 
 class ReasoningSource(StrEnum):
-    NATIVE = "native"       # real thinking blocks (Claude extended thinking)
-    INFERRED = "inferred"   # meta-LLM reconstruction
+    NATIVE = "native"  # real thinking blocks (Claude extended thinking)
+    INFERRED = "inferred"  # meta-LLM reconstruction
 
 
 class FlagType(StrEnum):
@@ -31,10 +31,10 @@ class FlagType(StrEnum):
 
 
 class FlagSource(StrEnum):
-    RULE = "rule"           # layer 1 — free, deterministic
-    EMBEDDING = "embedding" # layer 2 — cheap similarity
-    NATIVE = "native"       # layer 3 — thinking block analysis, Claude only
-    LLM = "llm"             # layer 4 — meta-LLM judgment
+    RULE = "rule"  # layer 1 — free, deterministic
+    EMBEDDING = "embedding"  # layer 2 — cheap similarity
+    NATIVE = "native"  # layer 3 — thinking block analysis, Claude only
+    LLM = "llm"  # layer 4 — meta-LLM judgment
 
 
 class Severity(StrEnum):
@@ -94,7 +94,7 @@ class TraceMeta(BaseModel):
 
 class RecutTrace(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
     agent_id: str
     prompt: str
     mode: TraceMode

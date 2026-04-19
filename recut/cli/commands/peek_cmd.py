@@ -71,7 +71,8 @@ async def _peek_async(trace_id: str, *, tui: bool = False) -> None:
                 str(step.index),
                 str(step.type),
                 str(flag.type),
-                f"[red]{flag.severity}[/red]" if flag.severity == "high"
+                f"[red]{flag.severity}[/red]"
+                if flag.severity == "high"
                 else f"[yellow]{flag.severity}[/yellow]",
                 flag.plain_reason[:80],
             )

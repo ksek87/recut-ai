@@ -3,7 +3,7 @@ from __future__ import annotations
 from recut.flagging.engine import FlaggingEngine
 from recut.plain.summariser import summarise_step, summarise_trace
 from recut.schema.audit import AuditMode, AuditRecord, ReviewStatus, RiskProfile
-from recut.schema.trace import FlagType, RecutTrace, Severity, TraceMode
+from recut.schema.trace import FlagType, RecutFlag, RecutTrace, Severity, TraceMode
 
 
 async def peek(trace: RecutTrace) -> AuditRecord:
@@ -38,7 +38,7 @@ async def _score_trace_steps(trace: RecutTrace, engine: FlaggingEngine) -> None:
         step.plain_summary = summarise_step(step, trace.language)
 
 
-def _compute_risk_score(flags: list) -> float:
+def _compute_risk_score(flags: list[RecutFlag]) -> float:
     if not flags:
         return 0.0
     weights = {Severity.LOW: 0.3, Severity.MEDIUM: 0.6, Severity.HIGH: 1.0}
@@ -65,11 +65,13 @@ def _build_audit_record(trace: RecutTrace, mode: AuditMode) -> AuditRecord:
         flag_count=len(all_flags),
         highest_severity=highest,
         risk_profile=profile,
-        review_status=ReviewStatus.PENDING_HUMAN if highest == Severity.HIGH.value else ReviewStatus.AUTO,
+        review_status=ReviewStatus.PENDING_HUMAN
+        if highest == Severity.HIGH.value
+        else ReviewStatus.AUTO,
     )
 
 
-def _build_risk_profile(flags: list) -> RiskProfile:
+def _build_risk_profile(flags: list[RecutFlag]) -> RiskProfile:
     profile = RiskProfile()
     counter_map = {
         FlagType.OVERCONFIDENCE: "overconfidence_count",

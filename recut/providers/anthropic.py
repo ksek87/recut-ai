@@ -122,6 +122,7 @@ class AnthropicProvider(AbstractProvider):
 
             elif block.type == "tool_use":
                 import json
+
                 step = RecutStep(
                     index=step_index,
                     type=StepType.TOOL_CALL,
@@ -168,20 +169,37 @@ def _steps_to_messages(steps: list[RecutStep], injection: dict) -> list[dict]:
                 data = json.loads(step.content)
             except Exception:
                 data = {"name": "unknown", "input": step.content}
-            messages.append({
-                "role": "assistant",
-                "content": [{"type": "tool_use", "name": data.get("name"), "input": data.get("input", {}), "id": str(uuid.uuid4())}],
-            })
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "name": data.get("name"),
+                            "input": data.get("input", {}),
+                            "id": str(uuid.uuid4()),
+                        }
+                    ],
+                }
+            )
         elif step.type == StepType.TOOL_RESULT:
-            content = injection.get("injected_content", step.content) if injection.get("target") == "tool_result" else step.content
-            messages.append({
-                "role": "user",
-                "content": [{"type": "tool_result", "content": content}],
-            })
+            content = (
+                injection.get("injected_content", step.content)
+                if injection.get("target") == "tool_result"
+                else step.content
+            )
+            messages.append(
+                {
+                    "role": "user",
+                    "content": [{"type": "tool_result", "content": content}],
+                }
+            )
         elif step.type == StepType.OUTPUT:
-            messages.append({
-                "role": "assistant",
-                "content": step.content,
-            })
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": step.content,
+                }
+            )
 
     return messages

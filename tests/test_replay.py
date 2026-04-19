@@ -2,11 +2,10 @@
 Tests for recut/core/replayer.py and recut/core/auditor.py.
 No live API calls — providers and storage are mocked throughout.
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
-
-import pytest
 
 from recut.core.auditor import (
     _build_risk_profile,
@@ -16,26 +15,22 @@ from recut.core.auditor import (
 )
 from recut.core.replayer import _compute_diff
 from recut.schema.audit import AuditMode, AuditRecord, RiskProfile
-from recut.schema.fork import ForkDiff, ForkInjection, InjectionTarget
+from recut.schema.fork import ForkDiff
 from recut.schema.trace import (
     FlagSource,
     FlagType,
+    ReasoningSource,
     RecutFlag,
     RecutStep,
-    RecutTrace,
-    ReasoningSource,
     Severity,
     StepReasoning,
     StepType,
-    TraceMeta,
-    TraceLanguage,
-    TraceMode,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_step(
     index: int,
@@ -79,8 +74,8 @@ def _make_flag(flag_type: FlagType, severity: Severity, step_id: str = "s") -> R
 # _compute_diff
 # ===========================================================================
 
-class TestComputeDiff:
 
+class TestComputeDiff:
     def test_identical_steps_divergence_equals_fork_index(self):
         """When all steps are identical, divergence_step should equal fork_index."""
         fork_index = 3
@@ -189,8 +184,8 @@ class TestComputeDiff:
 # _compute_risk_score
 # ===========================================================================
 
-class TestComputeRiskScore:
 
+class TestComputeRiskScore:
     def test_empty_flags_returns_zero(self):
         assert _compute_risk_score([]) == 0.0
 
@@ -226,8 +221,8 @@ class TestComputeRiskScore:
 # _build_risk_profile
 # ===========================================================================
 
-class TestBuildRiskProfile:
 
+class TestBuildRiskProfile:
     def test_empty_flags_all_zero(self):
         profile = _build_risk_profile([])
         assert profile.anomalous_tool_use_count == 0
@@ -267,11 +262,13 @@ class TestBuildRiskProfile:
 # peek() — auditor
 # ===========================================================================
 
-class TestPeek:
 
+class TestPeek:
     async def test_peek_returns_audit_record(self, trace_simple):
-        with patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=None)), \
-             patch("recut.flagging.engine._cache_flags", new=AsyncMock()):
+        with (
+            patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=None)),
+            patch("recut.flagging.engine._cache_flags", new=AsyncMock()),
+        ):
             record = await peek(trace_simple)
 
         assert isinstance(record, AuditRecord)
@@ -280,8 +277,10 @@ class TestPeek:
 
     async def test_peek_clean_fixture_flag_count_zero(self, trace_simple):
         """trace_simple.json has no anomalies — peek should return flag_count=0."""
-        with patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=None)), \
-             patch("recut.flagging.engine._cache_flags", new=AsyncMock()):
+        with (
+            patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=None)),
+            patch("recut.flagging.engine._cache_flags", new=AsyncMock()),
+        ):
             record = await peek(trace_simple)
 
         assert record.flag_count == 0
@@ -289,36 +288,46 @@ class TestPeek:
 
     async def test_peek_detects_anomalous_tool_use_in_flagged_fixture(self, trace_with_flags):
         """trace_with_flags.json has a repeated tool call — peek should flag it."""
-        with patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=None)), \
-             patch("recut.flagging.engine._cache_flags", new=AsyncMock()):
+        with (
+            patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=None)),
+            patch("recut.flagging.engine._cache_flags", new=AsyncMock()),
+        ):
             record = await peek(trace_with_flags)
 
         assert record.flag_count > 0
         assert record.risk_profile.anomalous_tool_use_count >= 1
 
-    async def test_peek_detects_reasoning_action_mismatch_in_flagged_fixture(self, trace_with_flags):
+    async def test_peek_detects_reasoning_action_mismatch_in_flagged_fixture(
+        self, trace_with_flags
+    ):
         """
         trace_with_flags.json step-013 has uncertainty in native reasoning
         but confidence phrases in output — layer 3 should detect the mismatch.
         """
-        with patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=None)), \
-             patch("recut.flagging.engine._cache_flags", new=AsyncMock()):
+        with (
+            patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=None)),
+            patch("recut.flagging.engine._cache_flags", new=AsyncMock()),
+        ):
             record = await peek(trace_with_flags)
 
         assert record.risk_profile.reasoning_action_mismatch_count >= 1
 
     async def test_peek_highest_severity_set_on_flagged_trace(self, trace_with_flags):
         """A trace with HIGH flags should produce highest_severity='high'."""
-        with patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=None)), \
-             patch("recut.flagging.engine._cache_flags", new=AsyncMock()):
+        with (
+            patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=None)),
+            patch("recut.flagging.engine._cache_flags", new=AsyncMock()),
+        ):
             record = await peek(trace_with_flags)
 
         # We expect at least one HIGH flag from the repeated tool call
         assert record.highest_severity is not None
 
     async def test_peek_behavioral_summary_is_string(self, trace_simple):
-        with patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=None)), \
-             patch("recut.flagging.engine._cache_flags", new=AsyncMock()):
+        with (
+            patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=None)),
+            patch("recut.flagging.engine._cache_flags", new=AsyncMock()),
+        ):
             record = await peek(trace_simple)
 
         assert isinstance(record.behavioral_summary, str)
@@ -329,12 +338,14 @@ class TestPeek:
 # audit() — auditor
 # ===========================================================================
 
-class TestAudit:
 
+class TestAudit:
     async def test_audit_clean_fixture_flag_count_zero(self, trace_simple):
         """audit on clean trace should return AuditRecord with flag_count=0."""
-        with patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=None)), \
-             patch("recut.flagging.engine._cache_flags", new=AsyncMock()):
+        with (
+            patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=None)),
+            patch("recut.flagging.engine._cache_flags", new=AsyncMock()),
+        ):
             record = await audit(trace_simple)
 
         assert isinstance(record, AuditRecord)
@@ -342,15 +353,19 @@ class TestAudit:
         assert record.mode == AuditMode.AUDIT
 
     async def test_audit_returns_audit_mode(self, trace_with_flags):
-        with patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=None)), \
-             patch("recut.flagging.engine._cache_flags", new=AsyncMock()):
+        with (
+            patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=None)),
+            patch("recut.flagging.engine._cache_flags", new=AsyncMock()),
+        ):
             record = await audit(trace_with_flags)
 
         assert record.mode == AuditMode.AUDIT
 
     async def test_audit_flagged_fixture_has_flags(self, trace_with_flags):
-        with patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=None)), \
-             patch("recut.flagging.engine._cache_flags", new=AsyncMock()):
+        with (
+            patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=None)),
+            patch("recut.flagging.engine._cache_flags", new=AsyncMock()),
+        ):
             record = await audit(trace_with_flags)
 
         assert record.flag_count > 0
@@ -359,16 +374,20 @@ class TestAudit:
         """AuditRecord.review_status should be PENDING_HUMAN when there is a HIGH flag."""
         from recut.schema.audit import ReviewStatus
 
-        with patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=None)), \
-             patch("recut.flagging.engine._cache_flags", new=AsyncMock()):
+        with (
+            patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=None)),
+            patch("recut.flagging.engine._cache_flags", new=AsyncMock()),
+        ):
             record = await audit(trace_with_flags)
 
         if record.highest_severity == "high":
             assert record.review_status == ReviewStatus.PENDING_HUMAN
 
     async def test_audit_trace_id_matches(self, trace_simple):
-        with patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=None)), \
-             patch("recut.flagging.engine._cache_flags", new=AsyncMock()):
+        with (
+            patch("recut.flagging.engine._get_cached_flags", new=AsyncMock(return_value=None)),
+            patch("recut.flagging.engine._cache_flags", new=AsyncMock()),
+        ):
             record = await audit(trace_simple)
 
         assert record.trace_id == trace_simple.id

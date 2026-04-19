@@ -31,9 +31,12 @@ app.add_typer(export_cmd.app, name="export")
 
 
 @app.callback(invoke_without_command=True)
-def main(ctx: typer.Context, version: bool = typer.Option(False, "--version", "-v", help="Show version")) -> None:
+def main(
+    ctx: typer.Context, version: bool = typer.Option(False, "--version", "-v", help="Show version")
+) -> None:
     if version:
         from recut import __version__
+
         console.print(f"recut-ai v{__version__}")
         raise typer.Exit()
     if ctx.invoked_subcommand is None:
