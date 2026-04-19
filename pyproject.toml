@@ -40,6 +40,11 @@ recut = "recut.cli.app:app"
 embeddings = [
     "sentence-transformers>=3.0",
 ]
+demo = [
+    "opentelemetry-api>=1.20",
+    "opentelemetry-sdk>=1.20",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.20",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
