@@ -5,6 +5,7 @@ Designed to fire two HIGH-severity flags without requiring any API key:
   - Step 3: ANOMALOUS_TOOL_USE (identical duplicate tool call)
   - Step 5: REASONING_ACTION_MISMATCH (uncertain reasoning → overconfident output)
 """
+
 from __future__ import annotations
 
 import json

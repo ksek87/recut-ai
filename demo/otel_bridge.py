@@ -11,6 +11,7 @@ Usage:
     provider = setup_otel("my-agent")           # ConsoleSpanExporter by default
     emit_trace(trace, steps, flags_by_step)     # prints spans to stdout
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -25,7 +26,7 @@ from recut.schema.trace import RecutFlag, RecutStep, RecutTrace
 def setup_otel(
     service_name: str = "recut-demo",
     endpoint: str | None = None,
-) -> "TracerProvider":
+) -> TracerProvider:
     """
     Configure the OTel SDK.
 
@@ -58,7 +59,7 @@ def emit_trace(
     trace_obj: RecutTrace,
     steps: list[RecutStep],
     flags_by_step: dict[str, list[RecutFlag]],
-    tracer: "Tracer | None" = None,
+    tracer: Tracer | None = None,
 ) -> None:
     """Emit one root span per trace, one child span per step."""
     from opentelemetry import trace
@@ -83,7 +84,7 @@ def emit_trace(
 def _emit_step(
     step: RecutStep,
     flags: list[RecutFlag],
-    tracer: "Tracer",
+    tracer: Tracer,
 ) -> None:
     from opentelemetry import trace
 
@@ -101,9 +102,7 @@ def _emit_step(
         if step.reasoning:
             span.set_attribute("recut.reasoning.source", step.reasoning.source.value)
             span.set_attribute("recut.reasoning.confidence", step.reasoning.confidence)
-            span.set_attribute(
-                "recut.reasoning.content_preview", step.reasoning.content[:200]
-            )
+            span.set_attribute("recut.reasoning.content_preview", step.reasoning.content[:200])
 
         for flag in flags:
             span.add_event(

@@ -15,6 +15,7 @@ Run:
 
 No ANTHROPIC_API_KEY required.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -44,9 +45,7 @@ from recut.schema.trace import (
 
 console = Console()
 
-DEMO_PROMPT = (
-    "Analyse NVDA's 2024 stock performance and provide a clear investment recommendation."
-)
+DEMO_PROMPT = "Analyse NVDA's 2024 stock performance and provide a clear investment recommendation."
 
 
 # ---------------------------------------------------------------------------
@@ -134,9 +133,7 @@ async def phase2_peek(
     flags_by_step = await engine.score_batch(steps, DEMO_PROMPT)
 
     total = sum(len(v) for v in flags_by_step.values())
-    high = sum(
-        1 for flags in flags_by_step.values() for f in flags if f.severity == Severity.HIGH
-    )
+    high = sum(1 for flags in flags_by_step.values() for f in flags if f.severity == Severity.HIGH)
     console.print(f"[green]Flags raised:[/green] {total} total, [red]{high} HIGH[/red]")
     _print_flags(flags_by_step)
     return flags_by_step
@@ -194,8 +191,7 @@ async def phase4_replay(
 
     total = sum(len(v) for v in replay_flags.values())
     console.print(
-        f"[green]Replay complete.[/green] {len(replayed)} steps, "
-        f"{total} flag(s) after correction."
+        f"[green]Replay complete.[/green] {len(replayed)} steps, {total} flag(s) after correction."
     )
     return replayed
 
@@ -236,9 +232,7 @@ def phase6_export(trace: RecutTrace) -> Path:
     out_path = Path("demo") / "demo_trace.recut.json"
     result = export(trace, output_path=out_path)
     size_kb = result.stat().st_size / 1024
-    console.print(
-        f"[green]Exported:[/green] {result}  ({size_kb:.1f} KB)"
-    )
+    console.print(f"[green]Exported:[/green] {result}  ({size_kb:.1f} KB)")
     return result
 
 
