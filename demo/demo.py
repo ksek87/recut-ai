@@ -8,7 +8,8 @@ Connected mode:  real yfinance + DuckDuckGo data
 Offline mode:    canned responses, no external calls
 
 Run:
-    ANTHROPIC_API_KEY=sk-ant-... python demo/demo.py
+    echo "ANTHROPIC_API_KEY=sk-ant-..." > .env
+    python demo/demo.py
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from dotenv import load_dotenv
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -435,6 +437,7 @@ def phase4_otel(
 
 
 async def main() -> None:
+    load_dotenv()
     use_real = bool(os.environ.get("ANTHROPIC_API_KEY"))
 
     console.print(

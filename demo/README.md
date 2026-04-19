@@ -24,7 +24,8 @@ pip install -e ".[demo]"   # adds opentelemetry deps
 ## Run
 
 ```bash
-ANTHROPIC_API_KEY=sk-ant-... python demo/demo.py
+echo "ANTHROPIC_API_KEY=sk-ant-..." > .env
+python demo/demo.py
 ```
 
 Without an API key the demo runs in offline mode using `MockProvider` — useful for testing the SDK integration without API access.
