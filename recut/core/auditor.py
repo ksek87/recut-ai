@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional
-
 from recut.flagging.engine import FlaggingEngine
 from recut.plain.summariser import summarise_step, summarise_trace
 from recut.schema.audit import AuditMode, AuditRecord, ReviewStatus, RiskProfile
@@ -30,7 +28,6 @@ async def audit(trace: RecutTrace) -> AuditRecord:
 
 async def _score_trace_steps(trace: RecutTrace, engine: FlaggingEngine) -> None:
     """Score all steps in the trace using the given engine, mutating in-place."""
-    from recut.plain.summariser import summarise_step
 
     for i, step in enumerate(trace.steps):
         preceding = trace.steps[max(0, i - 2) : i]
@@ -53,7 +50,7 @@ def _build_audit_record(trace: RecutTrace, mode: AuditMode) -> AuditRecord:
     all_flags = [f for step in trace.steps for f in step.flags]
     profile = _build_risk_profile(all_flags)
 
-    highest: Optional[str] = None
+    highest: str | None = None
     if any(f.severity == Severity.HIGH for f in all_flags):
         highest = Severity.HIGH.value
     elif any(f.severity == Severity.MEDIUM for f in all_flags):
@@ -68,7 +65,9 @@ def _build_audit_record(trace: RecutTrace, mode: AuditMode) -> AuditRecord:
         flag_count=len(all_flags),
         highest_severity=highest,
         risk_profile=profile,
-        review_status=ReviewStatus.PENDING_HUMAN if highest == Severity.HIGH.value else ReviewStatus.AUTO,
+        review_status=ReviewStatus.PENDING_HUMAN
+        if highest == Severity.HIGH.value
+        else ReviewStatus.AUTO,
     )
 
 

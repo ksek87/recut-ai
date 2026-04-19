@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import AsyncIterator, Callable, Optional
+from collections.abc import AsyncIterator
 
 from recut.flagging.engine import FlaggingEngine
 from recut.plain.summariser import flag_suggested_action, summarise_step
@@ -22,7 +22,7 @@ class InterceptSession:
         self,
         trace: RecutTrace,
         flag_handlers: list[FlagHandler],
-        pause_on_severity: Optional[str] = None,
+        pause_on_severity: str | None = None,
     ):
         self.trace = trace
         self._flag_handlers = flag_handlers
@@ -80,7 +80,7 @@ async def intercept(
     trace: RecutTrace,
     step_generator: AsyncIterator[RecutStep],
     flag_handlers: list[FlagHandler] | None = None,
-    pause_on_severity: Optional[str] = None,
+    pause_on_severity: str | None = None,
 ) -> AsyncIterator[RecutStep]:
     """
     Wrap a step generator with real-time interception.

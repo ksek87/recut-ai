@@ -13,7 +13,9 @@ console = Console()
 def intercept_cmd(
     prompt: str = typer.Argument(..., help="The prompt to send to the agent"),
     agent: str = typer.Option("default", "--agent", "-a"),
-    pause_on: str | None = typer.Option(None, "--pause-on", help="Pause on severity: low | medium | high"),
+    pause_on: str | None = typer.Option(
+        None, "--pause-on", help="Pause on severity: low | medium | high"
+    ),
 ) -> None:
     """Run an agent and intercept steps in real time."""
     asyncio.run(_intercept_async(prompt, agent, pause_on))
@@ -38,7 +40,9 @@ async def _intercept_async(prompt: str, agent_id: str, pause_on: str | None) -> 
         ctx.trace.prompt = prompt
         step_gen = provider.run_agent(prompt)
 
-        async for step in intercept(ctx.trace, step_gen, flag_handlers=[flag_handler], pause_on_severity=pause_on):
+        async for step in intercept(
+            ctx.trace, step_gen, flag_handlers=[flag_handler], pause_on_severity=pause_on
+        ):
             console.print(f"  [dim]step {step.index}[/dim] {step.plain_summary}")
 
     console.print(f"\n[green]Trace saved:[/green] {ctx.trace.id}")

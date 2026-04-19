@@ -2,19 +2,18 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from enum import Enum
-from typing import Optional
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 
-class ForkType(str, Enum):
+class ForkType(StrEnum):
     MANUAL = "manual"
     STRESS_VARIANT = "stress_variant"
     RED_TEAM = "red_team"
 
 
-class InjectionTarget(str, Enum):
+class InjectionTarget(StrEnum):
     TOOL_RESULT = "tool_result"
     REASONING = "reasoning"
     SYSTEM_PROMPT = "system_prompt"
@@ -41,4 +40,4 @@ class RecutFork(BaseModel):
     fork_type: ForkType = ForkType.MANUAL
     injection: ForkInjection
     replay_steps: list = []
-    diff: Optional[ForkDiff] = None
+    diff: ForkDiff | None = None

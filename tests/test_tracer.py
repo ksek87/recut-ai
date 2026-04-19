@@ -2,12 +2,11 @@
 Tests for recut/core/tracer.py.
 No live API calls — _persist_trace is mocked throughout.
 """
+
 from __future__ import annotations
 
 import time
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
+from unittest.mock import AsyncMock, patch
 
 from recut.core.tracer import (
     RecutContext,
@@ -18,19 +17,16 @@ from recut.core.tracer import (
 from recut.schema.trace import (
     RecutStep,
     RecutTrace,
-    ReasoningSource,
-    Severity,
-    StepReasoning,
     StepType,
-    TraceMeta,
     TraceLanguage,
+    TraceMeta,
     TraceMode,
 )
-
 
 # ---------------------------------------------------------------------------
 # Minimal stub provider so we never hit AbstractProvider enforcement
 # ---------------------------------------------------------------------------
+
 
 class _StubProvider:
     model = "stub-model"
@@ -41,7 +37,9 @@ class _StubProvider:
     def supports_native_reasoning(self) -> bool:
         return False
 
-    async def replay_from(self, steps, fork_index, injection) -> list[RecutStep]:  # pragma: no cover
+    async def replay_from(
+        self, steps, fork_index, injection
+    ) -> list[RecutStep]:  # pragma: no cover
         raise NotImplementedError
 
     async def run_agent(self, prompt, system=None, tools=None):  # pragma: no cover
@@ -51,6 +49,7 @@ class _StubProvider:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_step(index: int, risk_score: float = 0.0) -> RecutStep:
     return RecutStep(
@@ -65,43 +64,55 @@ def _make_step(index: int, risk_score: float = 0.0) -> RecutStep:
 # trace_context — context manager
 # ===========================================================================
 
-class TestTraceContext:
 
+class TestTraceContext:
     async def test_creates_recut_context_with_correct_agent_id(self):
-        with patch("recut.core.tracer._persist_trace", new=AsyncMock()), \
-             patch("recut.core.tracer._default_provider", return_value=_StubProvider()):
+        with (
+            patch("recut.core.tracer._persist_trace", new=AsyncMock()),
+            patch("recut.core.tracer._default_provider", return_value=_StubProvider()),
+        ):
             async with trace_context(agent_id="my-agent", mode=TraceMode.PEEK) as ctx:
                 assert ctx.trace.agent_id == "my-agent"
 
     async def test_creates_recut_context_with_correct_mode(self):
-        with patch("recut.core.tracer._persist_trace", new=AsyncMock()), \
-             patch("recut.core.tracer._default_provider", return_value=_StubProvider()):
+        with (
+            patch("recut.core.tracer._persist_trace", new=AsyncMock()),
+            patch("recut.core.tracer._default_provider", return_value=_StubProvider()),
+        ):
             async with trace_context(agent_id="a", mode=TraceMode.AUDIT) as ctx:
                 assert ctx.trace.mode == TraceMode.AUDIT
 
     async def test_creates_recut_context_with_correct_language(self):
-        with patch("recut.core.tracer._persist_trace", new=AsyncMock()), \
-             patch("recut.core.tracer._default_provider", return_value=_StubProvider()):
+        with (
+            patch("recut.core.tracer._persist_trace", new=AsyncMock()),
+            patch("recut.core.tracer._default_provider", return_value=_StubProvider()),
+        ):
             async with trace_context(agent_id="a", language=TraceLanguage.POWER) as ctx:
                 assert ctx.trace.language == TraceLanguage.POWER
 
     async def test_creates_recut_context_with_string_mode(self):
-        with patch("recut.core.tracer._persist_trace", new=AsyncMock()), \
-             patch("recut.core.tracer._default_provider", return_value=_StubProvider()):
+        with (
+            patch("recut.core.tracer._persist_trace", new=AsyncMock()),
+            patch("recut.core.tracer._default_provider", return_value=_StubProvider()),
+        ):
             async with trace_context(agent_id="a", mode="audit") as ctx:
                 assert ctx.trace.mode == TraceMode.AUDIT
 
     async def test_default_language_is_simple(self):
-        with patch("recut.core.tracer._persist_trace", new=AsyncMock()), \
-             patch("recut.core.tracer._default_provider", return_value=_StubProvider()):
+        with (
+            patch("recut.core.tracer._persist_trace", new=AsyncMock()),
+            patch("recut.core.tracer._default_provider", return_value=_StubProvider()),
+        ):
             async with trace_context(agent_id="a") as ctx:
                 assert ctx.trace.language == TraceLanguage.SIMPLE
 
     async def test_persist_trace_called_on_exit(self):
         mock_persist = AsyncMock()
-        with patch("recut.core.tracer._persist_trace", new=mock_persist), \
-             patch("recut.core.tracer._default_provider", return_value=_StubProvider()):
-            async with trace_context(agent_id="a") as ctx:
+        with (
+            patch("recut.core.tracer._persist_trace", new=mock_persist),
+            patch("recut.core.tracer._default_provider", return_value=_StubProvider()),
+        ):
+            async with trace_context(agent_id="a"):
                 pass
 
         mock_persist.assert_called_once()
@@ -119,8 +130,8 @@ class TestTraceContext:
 # RecutContext — add_step and risk_score
 # ===========================================================================
 
-class TestRecutContext:
 
+class TestRecutContext:
     def _make_ctx(self) -> RecutContext:
         trace_obj = RecutTrace(
             agent_id="agent",
@@ -185,8 +196,8 @@ class TestRecutContext:
 # @trace decorator
 # ===========================================================================
 
-class TestTraceDecorator:
 
+class TestTraceDecorator:
     async def test_sample_rate_zero_function_called_no_trace(self):
         """sample_rate=0.0 means function is never sampled — no trace created."""
         calls = []
@@ -261,6 +272,7 @@ class TestTraceDecorator:
         assert len(received_ctx) == 1
         assert received_ctx[0] is not None
         from recut.core.tracer import RecutContext
+
         assert isinstance(received_ctx[0], RecutContext)
 
     async def test_trace_captures_prompt_from_first_positional_arg(self):
@@ -295,8 +307,8 @@ class TestTraceDecorator:
 # _extract_prompt
 # ===========================================================================
 
-class TestExtractPrompt:
 
+class TestExtractPrompt:
     def test_positional_arg(self):
         assert _extract_prompt(("hello world",), {}) == "hello world"
 

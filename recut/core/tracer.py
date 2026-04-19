@@ -176,6 +176,7 @@ def _extract_prompt(args: tuple, kwargs: dict) -> str:
 
 def _default_provider() -> AbstractProvider:
     from recut.providers.anthropic import AnthropicProvider
+
     return AnthropicProvider()
 
 

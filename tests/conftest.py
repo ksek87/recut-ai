@@ -1,6 +1,7 @@
 """
 Shared pytest fixtures for the recut-ai test suite.
 """
+
 from __future__ import annotations
 
 import json
@@ -9,22 +10,19 @@ from typing import Any
 
 import pytest
 
+from recut.schema.fork import ForkInjection, InjectionTarget
 from recut.schema.trace import (
     FlagSource,
     FlagType,
+    ReasoningSource,
     RecutFlag,
     RecutStep,
     RecutTrace,
-    ReasoningSource,
     Severity,
     StepReasoning,
     StepType,
     TraceMeta,
-    TraceLanguage,
-    TraceMode,
 )
-from recut.schema.fork import ForkInjection, InjectionTarget
-from recut.schema.audit import AuditMode, AuditRecord, RiskProfile
 
 FIXTURES_DIR = pathlib.Path(__file__).parent / "fixtures"
 
@@ -32,6 +30,7 @@ FIXTURES_DIR = pathlib.Path(__file__).parent / "fixtures"
 # ---------------------------------------------------------------------------
 # Fixture file loaders
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def trace_simple_json() -> dict[str, Any]:
@@ -60,6 +59,7 @@ def trace_with_flags(trace_with_flags_json: dict[str, Any]) -> RecutTrace:
 # ---------------------------------------------------------------------------
 # Step builders
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def sample_reasoning_step() -> RecutStep:
@@ -112,6 +112,7 @@ def sample_flag() -> RecutFlag:
 # Injection / Fork helpers
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def sample_injection() -> ForkInjection:
     return ForkInjection(
@@ -124,6 +125,7 @@ def sample_injection() -> ForkInjection:
 # ---------------------------------------------------------------------------
 # Trace meta helper
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def sample_meta() -> TraceMeta:

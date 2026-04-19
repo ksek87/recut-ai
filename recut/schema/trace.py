@@ -2,25 +2,24 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from enum import Enum
-from typing import Optional
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 
-class StepType(str, Enum):
+class StepType(StrEnum):
     REASONING = "reasoning"
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
     OUTPUT = "output"
 
 
-class ReasoningSource(str, Enum):
-    NATIVE = "native"       # real thinking blocks (Claude extended thinking)
-    INFERRED = "inferred"   # meta-LLM reconstruction
+class ReasoningSource(StrEnum):
+    NATIVE = "native"  # real thinking blocks (Claude extended thinking)
+    INFERRED = "inferred"  # meta-LLM reconstruction
 
 
-class FlagType(str, Enum):
+class FlagType(StrEnum):
     OVERCONFIDENCE = "overconfidence"
     GOAL_DRIFT = "goal_drift"
     SCOPE_CREEP = "scope_creep"
@@ -31,14 +30,14 @@ class FlagType(str, Enum):
     REASONING_ACTION_MISMATCH = "reasoning_action_mismatch"
 
 
-class FlagSource(str, Enum):
-    RULE = "rule"           # layer 1 — free, deterministic
-    EMBEDDING = "embedding" # layer 2 — cheap similarity
-    NATIVE = "native"       # layer 3 — thinking block analysis, Claude only
-    LLM = "llm"             # layer 4 — meta-LLM judgment
+class FlagSource(StrEnum):
+    RULE = "rule"  # layer 1 — free, deterministic
+    EMBEDDING = "embedding"  # layer 2 — cheap similarity
+    NATIVE = "native"  # layer 3 — thinking block analysis, Claude only
+    LLM = "llm"  # layer 4 — meta-LLM judgment
 
 
-class Severity(str, Enum):
+class Severity(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
@@ -55,7 +54,7 @@ class RecutFlag(BaseModel):
 class StepReasoning(BaseModel):
     source: ReasoningSource
     content: str
-    thinking_tokens: Optional[int] = None
+    thinking_tokens: int | None = None
     confidence: float = Field(ge=0.0, le=1.0)
 
 
@@ -64,14 +63,14 @@ class RecutStep(BaseModel):
     index: int
     type: StepType
     content: str
-    reasoning: Optional[StepReasoning] = None
+    reasoning: StepReasoning | None = None
     risk_score: float = Field(default=0.0, ge=0.0, le=1.0)
     flags: list[RecutFlag] = []
     plain_summary: str = ""
     fork_eligible: bool = True
 
 
-class TraceMode(str, Enum):
+class TraceMode(StrEnum):
     INTERCEPT = "intercept"
     REPLAY = "replay"
     PEEK = "peek"
@@ -79,7 +78,7 @@ class TraceMode(str, Enum):
     STRESS = "stress"
 
 
-class TraceLanguage(str, Enum):
+class TraceLanguage(StrEnum):
     SIMPLE = "simple"
     POWER = "power"
 
@@ -87,10 +86,10 @@ class TraceLanguage(str, Enum):
 class TraceMeta(BaseModel):
     model: str
     provider: str
-    duration_seconds: Optional[float] = None
+    duration_seconds: float | None = None
     total_steps: int = 0
-    token_count: Optional[int] = None
-    thinking_tokens: Optional[int] = None
+    token_count: int | None = None
+    thinking_tokens: int | None = None
 
 
 class RecutTrace(BaseModel):

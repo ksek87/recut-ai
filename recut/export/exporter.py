@@ -47,4 +47,4 @@ def _build_payload(
 
 def load_export(path: str | Path) -> dict:
     """Load a .recut.json file back into a dict."""
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+    return json.loads(Path(path).read_text(encoding="utf-8"))  # type: ignore[no-any-return]

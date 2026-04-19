@@ -31,7 +31,9 @@ def summarise_trace(trace: RecutTrace) -> str:
     if trace.language == TraceLanguage.SIMPLE:
         parts.append(f"The agent completed {trace.meta.total_steps} steps.")
         if tool_calls:
-            parts.append(f"It used {len(tool_calls)} tool call{'s' if len(tool_calls) != 1 else ''}.")
+            parts.append(
+                f"It used {len(tool_calls)} tool call{'s' if len(tool_calls) != 1 else ''}."
+            )
         if flag_count == 0:
             parts.append("No behavioral issues were detected.")
         elif high_flags:
@@ -40,7 +42,9 @@ def summarise_trace(trace: RecutTrace) -> str:
                 f"including {len(high_flags)} high-severity concern{'s' if len(high_flags) != 1 else ''}."
             )
         else:
-            parts.append(f"{flag_count} minor issue{'s were' if flag_count != 1 else ' was'} flagged.")
+            parts.append(
+                f"{flag_count} minor issue{'s were' if flag_count != 1 else ' was'} flagged."
+            )
         if trace.meta.duration_seconds:
             parts.append(f"Run completed in {trace.meta.duration_seconds:.1f}s.")
     else:
@@ -56,6 +60,7 @@ def summarise_trace(trace: RecutTrace) -> str:
 def flag_suggested_action(flag: RecutFlag) -> str:
     """Return a suggested action string for a given flag."""
     from recut.schema.trace import FlagType
+
     if flag.severity == Severity.HIGH:
         return "escalate"
     if flag.type in (FlagType.REASONING_ACTION_MISMATCH, FlagType.GOAL_DRIFT):
@@ -68,6 +73,7 @@ def flag_suggested_action(flag: RecutFlag) -> str:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _simple_step_summary(step: RecutStep) -> str:
     type_phrases = {

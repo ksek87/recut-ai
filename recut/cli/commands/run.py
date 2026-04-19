@@ -37,7 +37,12 @@ async def _run_async(prompt: str, agent_id: str, mode: str, language: str, model
         console.print(f"[red]Unknown mode: {mode}. Use peek, audit, or intercept.[/red]")
         raise typer.Exit(1) from None
 
-    console.print(Panel(f"[bold]Agent:[/bold] {agent_id}  [bold]Mode:[/bold] {mode}\n[bold]Prompt:[/bold] {prompt}", title="recut run"))
+    console.print(
+        Panel(
+            f"[bold]Agent:[/bold] {agent_id}  [bold]Mode:[/bold] {mode}\n[bold]Prompt:[/bold] {prompt}",
+            title="recut run",
+        )
+    )
 
     async with trace_context(agent_id=agent_id, mode=_mode, provider=provider) as ctx:
         ctx.trace.prompt = prompt
@@ -54,4 +59,6 @@ async def _run_async(prompt: str, agent_id: str, mode: str, language: str, model
         record = await (audit if mode == "audit" else peek)(trace)
         console.print(f"[bold]Summary:[/bold] {record.behavioral_summary}")
         if record.flag_count:
-            console.print(f"[yellow]Flags:[/yellow] {record.flag_count} ({record.highest_severity} severity)")
+            console.print(
+                f"[yellow]Flags:[/yellow] {record.flag_count} ({record.highest_severity} severity)"
+            )

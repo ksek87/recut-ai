@@ -67,6 +67,7 @@ class StorageClient:
 
     def get_cached_flags(self, content_hash: str) -> FlagCache | None:
         from datetime import datetime
+
         with self._get_session() as session:
             row = session.get(FlagCache, content_hash)
             if row and row.expires_at > datetime.now(UTC):

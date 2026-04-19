@@ -37,8 +37,10 @@ class AuditView(App):
         for step in self._trace.steps:
             risk_str = f"{step.risk_score:.2f}"
             risk_markup = (
-                f"[red]{risk_str}[/red]" if step.risk_score >= 0.8
-                else f"[yellow]{risk_str}[/yellow]" if step.risk_score >= 0.5
+                f"[red]{risk_str}[/red]"
+                if step.risk_score >= 0.8
+                else f"[yellow]{risk_str}[/yellow]"
+                if step.risk_score >= 0.5
                 else risk_str
             )
             flag_count = len(step.flags)
@@ -48,8 +50,10 @@ class AuditView(App):
                 default=None,
             )
             flag_cell = (
-                f"[red]{flag_count}[/red]" if highest == Severity.HIGH
-                else f"[yellow]{flag_count}[/yellow]" if highest == Severity.MEDIUM
+                f"[red]{flag_count}[/red]"
+                if highest == Severity.HIGH
+                else f"[yellow]{flag_count}[/yellow]"
+                if highest == Severity.MEDIUM
                 else str(flag_count)
             )
             table.add_row(
@@ -63,7 +67,9 @@ class AuditView(App):
     def _build_summary_md(self) -> str:
         r = self._record
         profile = r.risk_profile.model_dump()
-        nonzero = {k.replace("_count", "").replace("_", " "): v for k, v in profile.items() if v > 0}
+        nonzero = {
+            k.replace("_count", "").replace("_", " "): v for k, v in profile.items() if v > 0
+        }
         profile_lines = "\n".join(f"- **{k}**: {v}" for k, v in nonzero.items()) or "_none_"
 
         return (

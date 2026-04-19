@@ -16,6 +16,7 @@ Quick start::
         async for step in provider.run_agent(prompt):
             ctx.add_step(step)
 """
+
 from __future__ import annotations
 
 import functools
