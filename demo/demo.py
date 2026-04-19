@@ -4,6 +4,9 @@ recut-ai SDK demo — Multi-step Research Agent
 A real multi-turn Claude agent with tool use, traced and flagged by recut-ai.
 Requires ANTHROPIC_API_KEY (falls back to MockProvider if absent).
 
+Connected mode:  real yfinance + DuckDuckGo data
+Offline mode:    canned responses, no external calls
+
 Run:
     ANTHROPIC_API_KEY=sk-ant-... python demo/demo.py
 """
@@ -39,102 +42,178 @@ console = Console()
 
 DEMO_PROMPT = (
     "Analyse NVIDIA (NVDA) as an investment opportunity. "
-    "Search for its current price, P/E ratio, revenue growth, analyst consensus, "
-    "and key risks. Also compare it to competitors in the AI chip space. "
-    "Provide a structured recommendation."
+    "Look up its current price, P/E ratio, revenue growth, and analyst consensus. "
+    "Search the web for any recent risks or concerns. "
+    "Compare it to competitors in the AI chip space. "
+    "Provide a structured Buy / Hold / Sell recommendation with reasoning."
 )
 
 # ---------------------------------------------------------------------------
-# Tool definitions + hardcoded responses (no external API needed)
+# Tool definitions
 # ---------------------------------------------------------------------------
 
 TOOLS = [
     {
-        "name": "search_financial_data",
-        "description": "Look up financial metrics for a stock ticker.",
+        "name": "get_stock_data",
+        "description": (
+            "Look up financial metrics for a stock ticker. "
+            "Returns real-time data from Yahoo Finance."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "ticker": {"type": "string", "description": "e.g. NVDA"},
+                "ticker": {"type": "string", "description": "e.g. NVDA, AMD"},
                 "metric": {
                     "type": "string",
-                    "enum": ["price", "pe_ratio", "revenue_growth", "analyst_consensus", "risks"],
+                    "enum": ["price", "pe_ratio", "revenue_growth", "analyst_consensus"],
+                    "description": "Which metric to retrieve.",
                 },
             },
             "required": ["ticker", "metric"],
         },
     },
     {
-        "name": "compare_competitors",
-        "description": "Compare a company to its main competitors on a given criteria.",
+        "name": "web_search",
+        "description": "Search the web for current news and analysis.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "company": {"type": "string"},
-                "criteria": {
-                    "type": "string",
-                    "enum": ["market_share", "valuation", "growth"],
-                },
+                "query": {"type": "string"},
             },
-            "required": ["company", "criteria"],
+            "required": ["query"],
         },
     },
 ]
 
-_TOOL_DATA: dict[str, dict] = {
-    "search_financial_data": {
-        ("NVDA", "price"): "NVDA: $875/share. +187% YTD. Market cap $2.15T.",
-        (
-            "NVDA",
-            "pe_ratio",
-        ): "NVDA P/E: 65x. Sector median: 28x. Premium reflects AI growth expectations.",
-        ("NVDA", "revenue_growth"): "Revenue +122% YoY ($44B TTM). Data center: 87% of revenue.",
-        ("NVDA", "analyst_consensus"): "Strong Buy. 38/42 analysts bullish. Avg. target: $1,050.",
-        ("NVDA", "risks"): (
-            "Key risks: China export controls, AMD competition, valuation multiple "
-            "contraction, customer concentration (Microsoft/Google/Meta = 40% of revenue)."
-        ),
-    },
-    "compare_competitors": {
-        (
-            "NVDA",
-            "market_share",
-        ): "NVDA: 80%+ data center GPU market share. AMD: ~15% (MI300X improving). Intel Gaudi: <5%.",
-        ("NVDA", "valuation"): "NVDA: 65x P/E. AMD: 45x. Intel: 25x (declining earnings).",
-        ("NVDA", "growth"): "NVDA: +122% YoY revenue. AMD: +18%. Intel: -1%.",
-    },
-}
+# ---------------------------------------------------------------------------
+# Real tool executors (yfinance + DuckDuckGo)
+# ---------------------------------------------------------------------------
 
 
-def _execute_tool(name: str, inputs: dict) -> str:
-    lookup = _TOOL_DATA.get(name, {})
-    if name == "search_financial_data":
-        key = (inputs.get("ticker", "").upper(), inputs.get("metric", ""))
-    elif name == "compare_competitors":
-        key = (inputs.get("company", "").upper(), inputs.get("criteria", ""))
-    else:
-        return f"Unknown tool: {name}"
-    return lookup.get(key, f"No data for {key}.")
+def _real_get_stock_data(ticker: str, metric: str) -> str:
+    import yfinance as yf
+
+    t = yf.Ticker(ticker.upper())
+    info = t.info
+
+    if metric == "price":
+        price = (
+            info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose")
+        )
+        change_52w = (info.get("52WeekChange") or 0) * 100
+        mktcap = info.get("marketCap", 0) / 1e12
+        return f"{ticker.upper()}: ${price:,.2f}. 52-week change: {change_52w:+.1f}%. Market cap: ${mktcap:.2f}T."
+
+    if metric == "pe_ratio":
+        pe = info.get("trailingPE")
+        fwd_pe = info.get("forwardPE")
+        return (
+            f"{ticker.upper()} trailing P/E: {pe:.1f}x. Forward P/E: {fwd_pe:.1f}x."
+            if pe and fwd_pe
+            else f"{ticker.upper()} P/E data unavailable."
+        )
+
+    if metric == "revenue_growth":
+        growth = (info.get("revenueGrowth") or 0) * 100
+        revenue = (info.get("totalRevenue") or 0) / 1e9
+        gross_margin = (info.get("grossMargins") or 0) * 100
+        return (
+            f"{ticker.upper()} TTM revenue: ${revenue:.1f}B. "
+            f"YoY growth: {growth:+.1f}%. Gross margin: {gross_margin:.1f}%."
+        )
+
+    if metric == "analyst_consensus":
+        rec = (info.get("recommendationKey") or "n/a").replace("_", " ").title()
+        target = info.get("targetMeanPrice")
+        low = info.get("targetLowPrice")
+        high = info.get("targetHighPrice")
+        n = info.get("numberOfAnalystOpinions") or "N/A"
+        target_str = f"${target:.0f} (range ${low:.0f}–${high:.0f})" if target else "N/A"
+        return f"{ticker.upper()} consensus: {rec}. Mean target: {target_str}. Analysts: {n}."
+
+    return f"Unknown metric: {metric}"
+
+
+def _real_web_search(query: str) -> str:
+    from duckduckgo_search import DDGS
+
+    results = list(DDGS().text(query, max_results=4))
+    if not results:
+        return "No results found."
+    return "\n".join(f"• {r['title']}: {r['body'][:200]}" for r in results)
+
+
+def _execute_tool_real(name: str, inputs: dict) -> str:
+    try:
+        if name == "get_stock_data":
+            return _real_get_stock_data(inputs["ticker"], inputs["metric"])
+        if name == "web_search":
+            return _real_web_search(inputs["query"])
+    except Exception as exc:
+        return f"Tool error ({name}): {exc}"
+    return f"Unknown tool: {name}"
 
 
 # ---------------------------------------------------------------------------
-# Real agentic loop (Anthropic API)
+# Canned tool responses (offline / mock mode only)
+# ---------------------------------------------------------------------------
+
+_CANNED: dict[tuple[str, str], str] = {
+    ("get_stock_data", "NVDA|price"): "NVDA: $875/share. +187% YTD. Market cap $2.15T.",
+    ("get_stock_data", "NVDA|pe_ratio"): "NVDA trailing P/E: 65.0x. Forward P/E: 38.0x.",
+    (
+        "get_stock_data",
+        "NVDA|revenue_growth",
+    ): "NVDA TTM revenue: $44.1B. YoY growth: +122.4%. Gross margin: 74.6%.",
+    (
+        "get_stock_data",
+        "NVDA|analyst_consensus",
+    ): "NVDA consensus: Strong Buy. Mean target: $1,050 (range $700–$1,400). Analysts: 42.",
+    ("get_stock_data", "AMD|price"): "AMD: $165/share. +12% YTD. Market cap $267B.",
+    ("get_stock_data", "AMD|pe_ratio"): "AMD trailing P/E: 280x. Forward P/E: 28x.",
+    (
+        "web_search",
+        "NVDA risks",
+    ): "• China export controls tightened in 2024 restrict H100/H200 sales.\n• AMD MI300X gaining enterprise adoption.\n• Customer concentration: Microsoft, Google, Meta = ~40% of revenue.",
+    (
+        "web_search",
+        "NVDA competitors AI chips",
+    ): "• AMD MI300X closing the gap in memory bandwidth for LLM inference.\n• Intel Gaudi 3 targeting enterprise at lower price points.\n• Custom silicon (Google TPU, AWS Trainium) reducing hyperscaler GPU spend.",
+}
+
+
+def _execute_tool_mock(name: str, inputs: dict) -> str:
+    if name == "get_stock_data":
+        key = (name, f"{inputs.get('ticker', '').upper()}|{inputs.get('metric', '')}")
+    elif name == "web_search":
+        query = inputs.get("query", "").lower()
+        # Fuzzy match on first keyword
+        for (n, k), v in _CANNED.items():
+            if n == "web_search" and any(word in query for word in k.split()):
+                return v
+        return "No cached results for this query."
+    else:
+        return f"Unknown tool: {name}"
+    return _CANNED.get(key, f"No cached data for {key}.")
+
+
+# ---------------------------------------------------------------------------
+# Agentic loops
 # ---------------------------------------------------------------------------
 
 
 async def _run_real_agent(prompt: str) -> tuple[list[RecutStep], str]:
-    """Multi-turn tool-calling loop. Returns (steps, provider_model)."""
+    """Multi-turn tool-calling loop against the real Anthropic API."""
     import anthropic
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
     model = os.environ.get("RECUT_DEMO_MODEL", "claude-sonnet-4-6")
-    client = anthropic.AsyncAnthropic(api_key=api_key)
+    client = anthropic.AsyncAnthropic()
 
     messages: list[dict] = [{"role": "user", "content": prompt}]
     all_steps: list[RecutStep] = []
     step_index = 0
 
-    for _turn in range(6):
+    for _turn in range(8):
         response = await client.messages.create(
             model=model,
             max_tokens=8000,
@@ -195,7 +274,8 @@ async def _run_real_agent(prompt: str) -> tuple[list[RecutStep], str]:
         messages.append({"role": "assistant", "content": assistant_content})
         tool_results = []
         for tu in tool_uses:
-            result = _execute_tool(tu.name, tu.input)
+            result = _execute_tool_real(tu.name, tu.input)
+            console.print(f"  [dim]  ↳ {tu.name}({_fmt_inputs(tu.input)}) → {result[:80]}…[/dim]")
             all_steps.append(RecutStep(index=step_index, type=StepType.TOOL_RESULT, content=result))
             step_index += 1
             tool_results.append({"type": "tool_result", "tool_use_id": tu.id, "content": result})
@@ -205,7 +285,7 @@ async def _run_real_agent(prompt: str) -> tuple[list[RecutStep], str]:
 
 
 async def _run_mock_agent(prompt: str) -> tuple[list[RecutStep], str]:
-    """Offline fallback using MockProvider."""
+    """Offline fallback: scripted MockProvider steps + canned tool responses."""
     from demo.mock_provider import MockProvider
 
     provider = MockProvider()
@@ -216,21 +296,22 @@ async def _run_mock_agent(prompt: str) -> tuple[list[RecutStep], str]:
     return steps, "mock-provider-v1"
 
 
+def _fmt_inputs(inputs: dict) -> str:
+    return ", ".join(f"{k}={v!r}" for k, v in inputs.items())
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
 def _build_trace(steps: list[RecutStep], model: str, prompt: str) -> RecutTrace:
+    provider = "AnthropicProvider" if model != "mock-provider-v1" else "MockProvider"
     return RecutTrace(
         agent_id="demo-research-agent",
         prompt=prompt,
         mode=TraceMode.PEEK,
-        meta=TraceMeta(
-            model=model,
-            provider="AnthropicProvider" if model != "mock-provider-v1" else "MockProvider",
-            total_steps=len(steps),
-        ),
+        meta=TraceMeta(model=model, provider=provider, total_steps=len(steps)),
         steps=steps,
     )
 
@@ -248,7 +329,6 @@ def _print_flags(flags_by_step: dict[str, list], steps: list[RecutStep]) -> None
     table.add_column("Type", width=30)
     table.add_column("Source", width=10)
     table.add_column("Reason")
-
     for step_id, flags in flags_by_step.items():
         for flag in flags:
             colour = {"high": "red", "medium": "yellow", "low": "green"}.get(
@@ -272,11 +352,12 @@ def _print_flags(flags_by_step: dict[str, list], steps: list[RecutStep]) -> None
 async def phase1_run(use_real: bool) -> tuple[list[RecutStep], RecutTrace]:
     _print_phase(1, "Run Agent")
     if use_real:
-        console.print(
-            f"[dim]Calling Claude API (model: {os.environ.get('RECUT_DEMO_MODEL', 'claude-sonnet-4-6')})...[/dim]"
-        )
+        model_name = os.environ.get("RECUT_DEMO_MODEL", "claude-sonnet-4-6")
+        console.print(f"[dim]Model: {model_name} | Tools: yfinance + DuckDuckGo[/dim]")
     else:
-        console.print("[yellow]ANTHROPIC_API_KEY not set — using MockProvider.[/yellow]")
+        console.print(
+            "[yellow]ANTHROPIC_API_KEY not set — offline mode (MockProvider + canned data).[/yellow]"
+        )
 
     steps, model = (
         await _run_real_agent(DEMO_PROMPT) if use_real else await _run_mock_agent(DEMO_PROMPT)
@@ -285,11 +366,12 @@ async def phase1_run(use_real: bool) -> tuple[list[RecutStep], RecutTrace]:
     for step in steps:
         preview = step.content[:70].replace("\n", " ")
         console.print(
-            f"  step {step.index}: [bold]{step.type.value}[/bold] — {preview}{'…' if len(step.content) > 70 else ''}"
+            f"  step {step.index}: [bold]{step.type.value}[/bold]"
+            f" — {preview}{'…' if len(step.content) > 70 else ''}"
         )
 
     trace = _build_trace(steps, model, DEMO_PROMPT)
-    console.print(f"\n[green]Trace:[/green] {trace.id}  ({len(steps)} steps, model={model})")
+    console.print(f"\n[green]Trace:[/green] {trace.id}  ({len(steps)} steps)")
     return steps, trace
 
 
@@ -304,7 +386,7 @@ async def phase2_flag(steps: list[RecutStep]) -> dict[str, list]:
     if total:
         _print_flags(flags_by_step, steps)
     else:
-        console.print("  [dim]No flags raised — agent behaviour looks clean.[/dim]")
+        console.print("  [dim]No flags raised.[/dim]")
     return flags_by_step
 
 
@@ -359,9 +441,9 @@ async def main() -> None:
         Panel(
             "[bold]recut-ai SDK Demo[/bold] — Multi-step Research Agent\n\n"
             + (
-                "Using real Claude API with extended thinking + tool use."
+                "Connected: real Claude API + live yfinance & DuckDuckGo data."
                 if use_real
-                else "[yellow]Offline mode — set ANTHROPIC_API_KEY for a real run.[/yellow]"
+                else "[yellow]Offline: set ANTHROPIC_API_KEY for a live run.[/yellow]"
             ),
             border_style="cyan",
         )
