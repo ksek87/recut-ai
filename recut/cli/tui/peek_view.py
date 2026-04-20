@@ -43,8 +43,10 @@ class PeekView(App):
             for flag in step.flags:
                 sev = flag.severity
                 severity_markup = (
-                    f"[red]{sev.upper()}[/red]" if sev == Severity.HIGH
-                    else f"[yellow]{sev.upper()}[/yellow]" if sev == Severity.MEDIUM
+                    f"[red]{sev.upper()}[/red]"
+                    if sev == Severity.HIGH
+                    else f"[yellow]{sev.upper()}[/yellow]"
+                    if sev == Severity.MEDIUM
                     else sev.upper()
                 )
                 table.add_row(

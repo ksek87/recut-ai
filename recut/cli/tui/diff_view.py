@@ -41,8 +41,10 @@ class DiffView(App):
         if self._fork.diff:
             delta = self._fork.diff.risk_delta
             delta_markup = (
-                f"[red]+{delta:.3f}[/red]" if delta > 0.05
-                else f"[green]{delta:+.3f}[/green]" if delta < -0.05
+                f"[red]+{delta:.3f}[/red]"
+                if delta > 0.05
+                else f"[green]{delta:+.3f}[/green]"
+                if delta < -0.05
                 else f"{delta:+.3f}"
             )
             yield Label(
@@ -54,7 +56,9 @@ class DiffView(App):
                 yield Label("Original", classes="panel-title")
                 yield DataTable(id="original")
             with Vertical():
-                yield Label(f"Replay (fork @ step {self._fork.fork_step_index})", classes="panel-title")
+                yield Label(
+                    f"Replay (fork @ step {self._fork.fork_step_index})", classes="panel-title"
+                )
                 yield DataTable(id="replayed")
         yield Footer()
 
@@ -68,7 +72,7 @@ class DiffView(App):
 
         divergence = self._fork.diff.divergence_step if self._fork.diff else None
 
-        for step in self._trace.steps[self._fork.fork_step_index:]:
+        for step in self._trace.steps[self._fork.fork_step_index :]:
             risk_str = f"{step.risk_score:.2f}"
             is_diverged = divergence is not None and step.index >= divergence
             original_table.add_row(

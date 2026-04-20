@@ -7,7 +7,6 @@ from recut.schema.trace import RecutStep
 
 
 class AbstractProvider(ABC):
-
     @abstractmethod
     async def capture_step(self, raw_response: dict) -> RecutStep:
         """Parse a raw LLM response into a RecutStep."""
@@ -29,7 +28,7 @@ class AbstractProvider(ABC):
         ...
 
     @abstractmethod
-    async def run_agent(
+    def run_agent(
         self,
         prompt: str,
         system: str | None = None,

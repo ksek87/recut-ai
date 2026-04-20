@@ -2,13 +2,14 @@
 Tests for all Pydantic schema models in recut/schema/.
 All tests are offline — no API calls.
 """
+
 from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from recut.schema.audit import AuditMode, AuditRecord, ReviewStatus, RiskProfile
 from recut.schema.fork import (
@@ -18,27 +19,27 @@ from recut.schema.fork import (
     InjectionTarget,
     RecutFork,
 )
-from recut.schema.hooks import RecutFlagEvent, SuggestedAction
+from recut.schema.hooks import RecutFlagEvent
 from recut.schema.stress import InjectionStrategy, RecutStressRun, StressVerdict
 from recut.schema.trace import (
     FlagSource,
     FlagType,
+    ReasoningSource,
     RecutFlag,
     RecutStep,
     RecutTrace,
-    ReasoningSource,
     Severity,
     StepReasoning,
     StepType,
-    TraceMeta,
     TraceLanguage,
+    TraceMeta,
     TraceMode,
 )
-
 
 # ===========================================================================
 # RecutFlag
 # ===========================================================================
+
 
 class TestRecutFlag:
     def test_construction_all_fields(self):
@@ -85,6 +86,7 @@ class TestRecutFlag:
 # StepReasoning
 # ===========================================================================
 
+
 class TestStepReasoning:
     def test_construction_with_all_fields(self):
         sr = StepReasoning(
@@ -112,7 +114,7 @@ class TestStepReasoning:
         assert sr_max.confidence == 1.0
 
     def test_confidence_out_of_range_raises(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             StepReasoning(source=ReasoningSource.NATIVE, content="x", confidence=1.5)
 
     def test_serialization_round_trip(self):
@@ -129,6 +131,7 @@ class TestStepReasoning:
 # ===========================================================================
 # RecutStep
 # ===========================================================================
+
 
 class TestRecutStep:
     def test_construction_defaults(self):
@@ -150,7 +153,7 @@ class TestRecutStep:
     def test_risk_score_boundaries(self):
         step = RecutStep(index=0, type=StepType.OUTPUT, content="x", risk_score=1.0)
         assert step.risk_score == 1.0
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             RecutStep(index=0, type=StepType.OUTPUT, content="x", risk_score=1.1)
 
     def test_serialization_round_trip(self, sample_tool_call_step):
@@ -177,6 +180,7 @@ class TestRecutStep:
 # TraceMeta
 # ===========================================================================
 
+
 class TestTraceMeta:
     def test_defaults(self):
         meta = TraceMeta(model="claude-haiku", provider="AnthropicProvider")
@@ -194,6 +198,7 @@ class TestTraceMeta:
 # ===========================================================================
 # RecutTrace
 # ===========================================================================
+
 
 class TestRecutTrace:
     def test_construction_defaults(self):
@@ -269,6 +274,7 @@ class TestRecutTrace:
 # ===========================================================================
 # RecutFork, ForkInjection, ForkDiff
 # ===========================================================================
+
 
 class TestForkInjection:
     def test_construction(self):
@@ -349,6 +355,7 @@ class TestRecutFork:
 # AuditRecord, RiskProfile
 # ===========================================================================
 
+
 class TestRiskProfile:
     def test_all_defaults_zero(self):
         profile = RiskProfile()
@@ -423,6 +430,7 @@ class TestAuditRecord:
 # RecutStressRun
 # ===========================================================================
 
+
 class TestRecutStressRun:
     def test_construction(self):
         run = RecutStressRun(
@@ -473,6 +481,7 @@ class TestRecutStressRun:
 # RecutFlagEvent
 # ===========================================================================
 
+
 class TestRecutFlagEvent:
     def test_construction_with_flag_handler(self, sample_flag, sample_tool_call_step):
         event = RecutFlagEvent(
@@ -515,6 +524,7 @@ class TestRecutFlagEvent:
 # ===========================================================================
 # Enum round-trips
 # ===========================================================================
+
 
 class TestEnumRoundTrips:
     """All str enums in schema/trace.py should serialize to str and back."""

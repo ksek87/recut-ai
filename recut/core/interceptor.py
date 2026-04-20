@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 from recut.flagging.engine import FlaggingEngine
 from recut.plain.summariser import flag_suggested_action, summarise_step
 from recut.schema.hooks import FlagHandler, RecutFlagEvent
-from recut.schema.trace import RecutStep, RecutTrace, TraceMode
+from recut.schema.trace import RecutFlag, RecutStep, RecutTrace, TraceMode
 
 
 class InterceptSession:
@@ -67,7 +67,7 @@ class InterceptSession:
         """Resume a paused intercept session."""
         self._paused.set()
 
-    def _should_pause(self, flag) -> bool:
+    def _should_pause(self, flag: RecutFlag) -> bool:
         if self._pause_on_severity is None:
             return False
         severity_order = {"low": 1, "medium": 2, "high": 3}

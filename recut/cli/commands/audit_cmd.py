@@ -51,12 +51,14 @@ async def _audit_async(trace_id: str, *, tui: bool = False) -> None:
         AuditView(trace, record).run()
         return
 
-    console.print(Panel(
-        f"[bold]Summary:[/bold] {record.behavioral_summary}\n\n"
-        f"[bold]Flags:[/bold] {record.flag_count} total, highest: {record.highest_severity or 'none'}\n"
-        f"[bold]Status:[/bold] {record.review_status.value}",
-        title=f"Audit — {trace.agent_id}",
-    ))
+    console.print(
+        Panel(
+            f"[bold]Summary:[/bold] {record.behavioral_summary}\n\n"
+            f"[bold]Flags:[/bold] {record.flag_count} total, highest: {record.highest_severity or 'none'}\n"
+            f"[bold]Status:[/bold] {record.review_status.value}",
+            title=f"Audit — {trace.agent_id}",
+        )
+    )
 
     profile = record.risk_profile
     profile_dict = profile.model_dump()

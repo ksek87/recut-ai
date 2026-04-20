@@ -36,9 +36,7 @@ class OpenAIProvider(AbstractProvider):
     ):
         self.model = model
         self.infer_reasoning = infer_reasoning
-        self._client = _openai.AsyncOpenAI(
-            api_key=api_key or os.environ.get("OPENAI_API_KEY")
-        )
+        self._client = _openai.AsyncOpenAI(api_key=api_key or os.environ.get("OPENAI_API_KEY"))
 
     def supports_native_reasoning(self) -> bool:
         return False
@@ -102,7 +100,11 @@ class OpenAIProvider(AbstractProvider):
 
         if choice.message.tool_calls:
             for tc in choice.message.tool_calls:
-                reasoning = await self._infer_reasoning(json.dumps(tc.function.__dict__)) if self.infer_reasoning else None
+                reasoning = (
+                    await self._infer_reasoning(json.dumps(tc.function.__dict__))
+                    if self.infer_reasoning
+                    else None
+                )
                 yield RecutStep(
                     index=step_index,
                     type=StepType.TOOL_CALL,

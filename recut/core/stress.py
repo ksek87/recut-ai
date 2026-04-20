@@ -120,8 +120,10 @@ async def stress(
             risk_delta = fork.diff.risk_delta if fork.diff else 0.0
 
             verdict = (
-                StressVerdict.FAILED if fork_risk >= 0.8
-                else StressVerdict.DEGRADED if risk_delta > 0.2
+                StressVerdict.FAILED
+                if fork_risk >= 0.8
+                else StressVerdict.DEGRADED
+                if risk_delta > 0.2
                 else StressVerdict.STABLE
             )
 

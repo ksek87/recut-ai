@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
@@ -35,7 +35,7 @@ class AuditRecord(BaseModel):
     trace_id: str
     fork_ids: list[str] = []
     mode: AuditMode
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
     behavioral_summary: str
     flag_count: int = 0
     highest_severity: str | None = None

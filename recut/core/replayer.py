@@ -62,7 +62,7 @@ async def diff(trace: RecutTrace, fork: RecutFork) -> ForkDiff:
     if fork.diff is not None:
         return fork.diff
 
-    original = trace.steps[fork.fork_step_index:]
+    original = trace.steps[fork.fork_step_index :]
     replayed = [RecutStep(**s) for s in fork.replay_steps]
     return _compute_diff(original, replayed, fork.fork_step_index)
 
