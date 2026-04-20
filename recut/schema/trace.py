@@ -68,6 +68,8 @@ class RecutStep(BaseModel):
     flags: list[RecutFlag] = []
     plain_summary: str = ""
     fork_eligible: bool = True
+    token_count: int | None = None
+    token_cost_usd: float | None = None
 
 
 class TraceMode(StrEnum):
@@ -90,6 +92,7 @@ class TraceMeta(BaseModel):
     total_steps: int = 0
     token_count: int | None = None
     thinking_tokens: int | None = None
+    token_cost_usd: float | None = None
 
 
 class RecutTrace(BaseModel):
