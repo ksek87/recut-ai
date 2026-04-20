@@ -91,12 +91,20 @@ TOOLS = [
 # Real tool executors (yfinance + DuckDuckGo)
 # ---------------------------------------------------------------------------
 
+_yf_cache: dict[str, dict] = {}  # ticker → info dict; avoids repeated network calls
+
+
+def _ticker_info(ticker: str) -> dict:
+    key = ticker.upper()
+    if key not in _yf_cache:
+        import yfinance as yf
+
+        _yf_cache[key] = yf.Ticker(key).info
+    return _yf_cache[key]
+
 
 def _real_get_stock_data(ticker: str, metric: str) -> str:
-    import yfinance as yf
-
-    t = yf.Ticker(ticker.upper())
-    info = t.info
+    info = _ticker_info(ticker)
 
     if metric == "price":
         price = (
@@ -156,47 +164,47 @@ def _execute_tool_real(name: str, inputs: dict) -> str:
     return f"Unknown tool: {name}"
 
 
+async def _execute_tools_parallel(tool_uses: list, executor: object | None = None) -> list[str]:
+    """Execute all tool calls from one API turn concurrently."""
+    loop = asyncio.get_running_loop()
+    return list(
+        await asyncio.gather(
+            *[loop.run_in_executor(None, _execute_tool_real, tu.name, tu.input) for tu in tool_uses]
+        )
+    )
+
+
 # ---------------------------------------------------------------------------
 # Canned tool responses (offline / mock mode only)
 # ---------------------------------------------------------------------------
 
-_CANNED: dict[tuple[str, str], str] = {
-    ("get_stock_data", "NVDA|price"): "NVDA: $875/share. +187% YTD. Market cap $2.15T.",
-    ("get_stock_data", "NVDA|pe_ratio"): "NVDA trailing P/E: 65.0x. Forward P/E: 38.0x.",
-    (
-        "get_stock_data",
-        "NVDA|revenue_growth",
-    ): "NVDA TTM revenue: $44.1B. YoY growth: +122.4%. Gross margin: 74.6%.",
-    (
-        "get_stock_data",
-        "NVDA|analyst_consensus",
-    ): "NVDA consensus: Strong Buy. Mean target: $1,050 (range $700–$1,400). Analysts: 42.",
-    ("get_stock_data", "AMD|price"): "AMD: $165/share. +12% YTD. Market cap $267B.",
-    ("get_stock_data", "AMD|pe_ratio"): "AMD trailing P/E: 280x. Forward P/E: 28x.",
-    (
-        "web_search",
-        "NVDA risks",
-    ): "• China export controls tightened in 2024 restrict H100/H200 sales.\n• AMD MI300X gaining enterprise adoption.\n• Customer concentration: Microsoft, Google, Meta = ~40% of revenue.",
-    (
-        "web_search",
-        "NVDA competitors AI chips",
-    ): "• AMD MI300X closing the gap in memory bandwidth for LLM inference.\n• Intel Gaudi 3 targeting enterprise at lower price points.\n• Custom silicon (Google TPU, AWS Trainium) reducing hyperscaler GPU spend.",
+_CANNED_STOCK: dict[str, str] = {
+    "NVDA|price": "NVDA: $875/share. +187% YTD. Market cap $2.15T.",
+    "NVDA|pe_ratio": "NVDA trailing P/E: 65.0x. Forward P/E: 38.0x.",
+    "NVDA|revenue_growth": "NVDA TTM revenue: $44.1B. YoY growth: +122.4%. Gross margin: 74.6%.",
+    "NVDA|analyst_consensus": "NVDA consensus: Strong Buy. Mean target: $1,050 (range $700–$1,400). Analysts: 42.",
+    "AMD|price": "AMD: $165/share. +12% YTD. Market cap $267B.",
+    "AMD|pe_ratio": "AMD trailing P/E: 280x. Forward P/E: 28x.",
+}
+
+# keyword (must appear in query) → canned result
+_CANNED_WEB: dict[str, str] = {
+    "risk": "• China export controls restrict H100/H200 sales.\n• AMD MI300X gaining enterprise adoption.\n• Customer concentration: Microsoft/Google/Meta = ~40% of revenue.",
+    "competitor": "• AMD MI300X closing the gap in memory bandwidth for LLM inference.\n• Intel Gaudi 3 targeting enterprise at lower price points.\n• Custom silicon (Google TPU, AWS Trainium) reducing hyperscaler GPU spend.",
 }
 
 
 def _execute_tool_mock(name: str, inputs: dict) -> str:
     if name == "get_stock_data":
-        key = (name, f"{inputs.get('ticker', '').upper()}|{inputs.get('metric', '')}")
-    elif name == "web_search":
+        key = f"{inputs.get('ticker', '').upper()}|{inputs.get('metric', '')}"
+        return _CANNED_STOCK.get(key, f"No cached data for {key}.")
+    if name == "web_search":
         query = inputs.get("query", "").lower()
-        # Fuzzy match on first keyword
-        for (n, k), v in _CANNED.items():
-            if n == "web_search" and any(word in query for word in k.split()):
-                return v
+        for keyword, result in _CANNED_WEB.items():
+            if keyword in query:
+                return result
         return "No cached results for this query."
-    else:
-        return f"Unknown tool: {name}"
-    return _CANNED.get(key, f"No cached data for {key}.")
+    return f"Unknown tool: {name}"
 
 
 # ---------------------------------------------------------------------------
@@ -274,9 +282,9 @@ async def _run_real_agent(prompt: str) -> tuple[list[RecutStep], str]:
             break
 
         messages.append({"role": "assistant", "content": assistant_content})
+        results = await _execute_tools_parallel(tool_uses)
         tool_results = []
-        for tu in tool_uses:
-            result = _execute_tool_real(tu.name, tu.input)
+        for tu, result in zip(tool_uses, results, strict=True):
             console.print(f"  [dim]  ↳ {tu.name}({_fmt_inputs(tu.input)}) → {result[:80]}…[/dim]")
             all_steps.append(RecutStep(index=step_index, type=StepType.TOOL_RESULT, content=result))
             step_index += 1
