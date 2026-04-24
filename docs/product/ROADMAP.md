@@ -37,15 +37,15 @@
 - [ ] Token cost attribution — `token_cost_usd` per step and per trace; surfaced in peek output and TUI dashboard
 - [ ] Structured LLM judge output — layer 4 returns per-flag `confidence` (0-1) and `evidence` (quoted step text) alongside score; no free-text black-box verdicts
 
-### Layer 4 — Bring Your Own Model (Ollama-first)
+### Layer 4 — Bring Your Own Model (local-first)
 
 Layer 4 is the LLM judge. It should never require an API key or send data to a third party by default.
 
-**Default: Ollama (local, offline, free)**
-- `RECUT_L4_BACKEND=ollama` (default)
-- `RECUT_L4_OLLAMA_URL=http://localhost:11434` (standard Ollama address)
-- `RECUT_L4_OLLAMA_MODEL=llama3.2` (default model; any Ollama-compatible model works)
-- If Ollama is not running, Layer 4 is silently skipped — no error, no cost
+**Default: any local model (Ollama recommended)**
+- `RECUT_L4_BACKEND=local` (default)
+- `RECUT_L4_LOCAL_URL=http://localhost:11434/v1` — any OpenAI-compatible local endpoint (Ollama, LM Studio, Jan, llama.cpp server, vLLM, Hugging Face TGI, etc.)
+- `RECUT_L4_LOCAL_MODEL=llama3.2` — any model available on your local runtime
+- If the local endpoint is unreachable, Layer 4 is silently skipped — no error, no cost
 - Zero data exfiltration, works fully offline, no API key, no billing surprises
 
 **Remote API (BYOK — bring your own key):**
@@ -54,13 +54,12 @@ Layer 4 is the LLM judge. It should never require an API key or send data to a t
 - `RECUT_META_MODEL` selects the model (default `claude-haiku-4-5-20251001`)
 
 **Remote call limit (configurable, default 20%):**
-- `RECUT_L4_REMOTE_MAX_PCT=0.20` — at most 20% of total steps in a trace may escalate to the remote API Layer 4 judge; the rest are handled by the local Ollama model or skipped
-- Applies only when `RECUT_L4_BACKEND` is a remote API — Ollama is uncapped (local, no cost)
+- `RECUT_L4_REMOTE_MAX_PCT=0.20` — at most 20% of total steps in a trace may escalate to the remote API Layer 4 judge; the rest are handled by the local model or skipped
+- Applies only when `RECUT_L4_BACKEND` is a remote API — local models are uncapped
 - Also supports `RECUT_L4_MAX_REMOTE_CALLS=N` (hard per-trace integer cap; whichever limit is hit first applies)
 - Sampling within the cap is weighted toward tool_call and output steps — the highest-stakes step types
-- Rationale: if layers 1-3 are doing their job, Layer 4 should only be touching a small fraction of steps; the 20% cap enforces that and keeps remote API costs bounded and predictable
 
-**Marketing framing:** Layer 4 uses a local model by default. No data leaves your machine. If you want higher-accuracy judgment on ambiguous steps and are comfortable with API costs, bring your own key and set your own limits.
+**Marketing framing:** Layer 4 uses a local model by default — your choice of runtime, your choice of model. No data leaves your machine. If you want higher-accuracy judgment on ambiguous steps, bring your own API key and set your own limits.
 
 ## v0.4 — CLI + TUI
 

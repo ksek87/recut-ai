@@ -89,7 +89,7 @@ Detection runs in four layers, cheapest first:
 1. **Rule-based** — free, instant, deterministic
 2. **Embedding similarity** — cosine distance from original prompt (optional, `sentence-transformers`)
 3. **Native thinking analysis** — Claude-only; reads extended thinking blocks directly
-4. **LLM judge** — defaults to a local [Ollama](https://ollama.com) model (`llama3.2`); no data leaves your machine, no API cost. Bring your own API key (`RECUT_L4_BACKEND=anthropic`) if you want higher-accuracy judgment on ambiguous steps, with a configurable remote call limit (`RECUT_L4_REMOTE_MAX_PCT`, default 20%).
+4. **LLM judge** — defaults to a local model via any OpenAI-compatible runtime (Ollama, LM Studio, Jan, llama.cpp, vLLM — your choice). No data leaves your machine, no API cost. If the local endpoint isn't running, layer 4 is silently skipped. Bring your own API key (`RECUT_L4_BACKEND=anthropic|openai`) for higher-accuracy judgment on ambiguous steps, with a configurable remote call limit (`RECUT_L4_REMOTE_MAX_PCT`, default 20%).
 
 Use `flagging_depth="fast"` to run only layers 1–3 (zero model cost, instant). Use `"full"` to include layer 4.
 

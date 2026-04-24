@@ -80,12 +80,12 @@ Fork a trace at step 4, inject a different tool result, run forward. See exactly
 **3. Intercept mid-run**
 Pause execution the moment a high-severity flag fires. Inspect the trace, redirect the agent, or abort. Pairs directly with the human-on-the-loop compliance requirement.
 
-**4. Layered detection — local model by default, bring your own if you want more**
-The flagging engine has four layers. The first three — rule-based, embedding similarity, and native thinking analysis — use no model at all. Layer 4 (the LLM judge) defaults to a **local Ollama model** (`llama3.2` by default): zero API cost, fully offline, no data leaves your machine. If Ollama isn't running, layer 4 is silently skipped — no error, no cost.
+**4. Layered detection — local model by default, bring whatever you want**
+The flagging engine has four layers. The first three — rule-based, embedding similarity, and native thinking analysis — use no model at all. Layer 4 (the LLM judge) defaults to a **local model of your choice** via any OpenAI-compatible local runtime — Ollama, LM Studio, Jan, llama.cpp, vLLM, Hugging Face TGI, or anything else. Zero API cost, fully offline, no data leaves your machine. If the local endpoint isn't running, layer 4 is silently skipped.
 
-For teams that want higher-accuracy judgment on ambiguous steps: bring your own API key (`RECUT_L4_BACKEND=anthropic|openai`). A configurable remote call limit (`RECUT_L4_REMOTE_MAX_PCT`, default 20%) ensures at most 20% of steps in a trace escalate to the remote API. The rest use the local Ollama model. Cost stays bounded and predictable; the limit is configurable per deployment.
+For teams that want higher-accuracy judgment: bring your own API key (`RECUT_L4_BACKEND=anthropic|openai`). A configurable remote call limit (`RECUT_L4_REMOTE_MAX_PCT`, default 20%) ensures at most 20% of steps escalate to the remote API. Cost stays bounded and predictable.
 
-Every flag shows which layer fired it: `[rule]`, `[embedding]`, `[native]`, or `[judge]`. Engineers can skip layer 4 entirely with `flagging_depth="fast"` for instant, zero-model flagging.
+Every flag shows which layer fired it: `[rule]`, `[embedding]`, `[native]`, or `[judge]`. Skip layer 4 entirely with `flagging_depth="fast"` for instant, zero-model flagging.
 
 **5. Behavioral fingerprinting from your own history**
 After enough runs, recut builds a per-agent statistical baseline from traces in your local store. New runs are compared to the baseline with Z-score anomaly detection — no model, no API, no opinion. "This run used 3.1σ more tool calls than baseline" is a deterministic mathematical signal.
