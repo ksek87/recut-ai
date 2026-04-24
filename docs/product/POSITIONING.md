@@ -29,17 +29,23 @@ The common thread: **no structured trace, no replay, no gate before action.** Bu
 
 ## Who This Is For
 
-**Primary: The AI engineer / product builder**
+Anyone building with agents or responsible for what they do. recut is not an ML tool — it's designed to be readable and actionable regardless of technical background.
 
-Not an ML researcher. A software generalist — often a senior engineer or technical PM — who integrates LLMs into product workflows. They're shipping agents for ops automation, document processing, customer workflows, or internal tooling. They use Claude or OpenAI APIs directly. They don't need another ML observability dashboard; they need a debugging primitive that works like the rest of their dev toolchain.
+**Builders — engineers, AI engineers, technical PMs**
 
-Gartner projects 40% of enterprise applications will have embedded agents by 2026. Most of the engineers building those agents are not ML engineers.
+The people writing agent code or wiring agents into product workflows. They need a debugging primitive, not another ML dashboard. When their agent breaks in production they need to know why in minutes, not after hours of log archaeology. recut gives them replay, behavioral flags in plain language, and intercept — primitives that work the way the rest of their dev toolchain does.
 
-**Secondary: Enterprise compliance / AI governance teams**
+Gartner projects 40% of enterprise applications will have embedded agents by 2026. Most of the people building those agents are not ML researchers. recut is built for them.
 
-The EU AI Act (Article 14) and NIST AI RMF both require demonstrable human oversight for high-risk AI systems. "Human-on-the-loop" is now a compliance concept, not just a UX preference. Teams in finance, legal, healthcare, and ops automation need structured audit trails of agent behavior — not just logs.
+**Reviewers — PMs, analysts, operations teams**
 
-**Tertiary: Security / red team engineers**
+The people responsible for what agents do but not necessarily writing the code. They need to be able to read an audit record, understand why a flag fired, approve or reject an agent action, and sign off on a compliance export — without decoding stack traces or ML scores. recut's plain-language flag reasons and structured audit records are written for this audience.
+
+**Governance and compliance teams**
+
+The EU AI Act (Article 14) and NIST AI RMF both require demonstrable human oversight for high-risk AI systems. Teams in finance, legal, healthcare, and ops automation need structured audit trails of agent behavior — not just logs. recut's intercept mode and compliance export are the technical implementation of that requirement.
+
+**Security and red team engineers**
 
 OWASP published the *Top 10 for Agentic Applications* (Dec 2025). MITRE ATLAS added 14 agent-specific attack techniques (Oct 2025). Red teaming agentic stacks is now a named practice. recut's stress mode speaks directly to this workflow.
 
@@ -88,10 +94,10 @@ After enough runs, recut builds a per-agent statistical baseline from traces in 
 Every step carries `token_cost_usd`. Every trace carries aggregate cost. Engineers see exactly how much each decision cost and where budget went before a failure. "This agent ran $4.20 before the goal_drift flag fired at step 7" — visible in `peek` output.
 
 **7. Behavioral flags in plain language**
-Every flag has a `plain_reason`: *"The agent seemed unsure in its thinking but acted confidently anyway — worth a closer look."* Written for engineers and compliance reviewers, not ML researchers.
+Every flag has a `plain_reason`: *"The agent seemed unsure in its thinking but acted confidently anyway — worth a closer look."* Written to be understood by anyone on the team — engineer, PM, analyst, or compliance reviewer — not just ML researchers.
 
-**8. Zero ML background required**
-The entire surface — CLI, TUI, flags, audit records — is designed for product engineers. No embeddings dashboard, no loss curves, no ML jargon.
+**8. No technical background required to get value**
+The CLI, TUI, flags, and audit records are designed to be readable by anyone responsible for agents — not just the engineers who built them. No embeddings dashboard, no loss curves, no ML jargon. A PM can read a peek report. A compliance officer can sign off on an audit record. An analyst can understand why a flag fired.
 
 **9. Works inside the frameworks you already use**
 recut is not a competing platform. It ships as a set of thin adapter packages that embed into LangChain, LangGraph, CrewAI, LlamaIndex, AutoGen, and any OpenTelemetry-instrumented stack. The behavioral flags and reasoning signal are pushed directly into LangSmith, Langfuse, Arize Phoenix, Datadog, or whatever observability backend the team already has — making those tools more useful, not redundant.
@@ -179,7 +185,7 @@ The conditions are right now:
 1. **Agentic failures are public and quantified.** 92% of businesses report cost overruns from agentic AI. 73% of teams self-report being "one prompt away from a budget disaster." The pain is real, visible, and getting press.
 2. **Regulatory pressure is creating a compliance pull.** EU AI Act Article 14, NIST AI RMF, SOC 2, HIPAA, and ISO 27001 auditors are now asking about agent decision provenance. IBM frames this as the need for "agent decision records (ADRs)" — structured logs of *why* an agent acted, not just *what* it did. recut produces exactly this.
 3. **Claude's extended thinking API is a narrow window.** Native reasoning capture is only possible because Anthropic exposed thinking blocks. No other tool in the market captures them. That window won't stay open indefinitely.
-4. **The "AI engineer" persona is now mainstream.** SF Standard declared "engineer is so 2025 — in AI land, everyone's a builder now." Gartner projects 40% of enterprise apps will have embedded agents by 2026. Most builders are not ML engineers; none of the existing ML observability tools are built for them.
+4. **Agent builders are not ML researchers.** Gartner projects 40% of enterprise apps will have embedded agents by 2026. Most of the people building, reviewing, and governing those agents — engineers, PMs, analysts, compliance teams — are not ML specialists. None of the existing ML observability tools are built for them.
 5. **Existing platforms are observer-only.** Even Fiddler — the most capable LLM monitoring platform — has no replay, no pre-action gate, no reasoning trace export. The market is wide open for a tool that acts as a *control layer*, not just a dashboard.
 
 The observability tools that exist were built when LLMs were stateless chat. Agents are stateful, multi-step, and capable of irreversible actions. The tooling hasn't caught up.
