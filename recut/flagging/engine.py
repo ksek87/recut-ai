@@ -3,8 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from datetime import UTC, datetime, timedelta
-from typing import Literal
+from datetime import datetime, timedelta
+from typing import Any, Literal
 
 from recut.flagging.flags import (
     CONFIDENCE_PHRASES,
