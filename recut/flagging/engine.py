@@ -46,14 +46,16 @@ class FlaggingEngine:
     ):
         self.mode = mode
         self.flagging_depth = flagging_depth
-        self._use_embeddings = use_embeddings if use_embeddings is not None else (
-            os.environ.get("RECUT_USE_EMBEDDINGS", "true").lower() == "true"
+        self._use_embeddings = (
+            use_embeddings
+            if use_embeddings is not None
+            else (os.environ.get("RECUT_USE_EMBEDDINGS", "true").lower() == "true")
         )
         # Layer 4 enabled only when flagging_depth="full"; use_llm_judge can override
         if use_llm_judge is not None:
             self._use_llm_judge = use_llm_judge
         else:
-            self._use_llm_judge = (flagging_depth == "full")
+            self._use_llm_judge = flagging_depth == "full"
 
     async def score_step(
         self,
