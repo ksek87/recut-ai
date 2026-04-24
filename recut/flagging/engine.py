@@ -4,7 +4,7 @@ import hashlib
 import json
 import os
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
 from recut.flagging.flags import (
     CONFIDENCE_PHRASES,
@@ -31,7 +31,10 @@ class FlaggingEngine:
     Layer 1: Rule-based (free, instant)
     Layer 2: Embedding similarity (cheap, optional)
     Layer 3: Native reasoning/action mismatch (free for Claude)
-    Layer 4: Batched LLM judge (only when needed and mode allows)
+    Layer 4: Batched LLM judge (only when flagging_depth="full")
+
+    Set flagging_depth="fast" (default) to run layers 1-3 only — zero meta-LLM cost.
+    Set flagging_depth="full" for compliance audit passes that include the LLM judge.
     """
 
     def __init__(
@@ -39,19 +42,20 @@ class FlaggingEngine:
         mode: TraceMode = TraceMode.PEEK,
         use_embeddings: bool | None = None,
         use_llm_judge: bool | None = None,
+        flagging_depth: Literal["fast", "full"] = "fast",
     ):
         self.mode = mode
+        self.flagging_depth = flagging_depth
         self._use_embeddings = (
             use_embeddings
             if use_embeddings is not None
             else (os.environ.get("RECUT_USE_EMBEDDINGS", "true").lower() == "true")
         )
-        # LLM judge only available in audit, replay, stress modes
-        self._use_llm_judge = (
-            use_llm_judge
-            if use_llm_judge is not None
-            else (mode in (TraceMode.AUDIT, TraceMode.REPLAY, TraceMode.STRESS))
-        )
+        # Layer 4 enabled only when flagging_depth="full"; use_llm_judge can override
+        if use_llm_judge is not None:
+            self._use_llm_judge = use_llm_judge
+        else:
+            self._use_llm_judge = flagging_depth == "full"
 
     async def score_step(
         self,
