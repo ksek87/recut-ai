@@ -74,8 +74,12 @@ Fork a trace at step 4, inject a different tool result, run forward. See exactly
 **3. Intercept mid-run**
 Pause execution the moment a high-severity flag fires. Inspect the trace, redirect the agent, or abort. Pairs directly with the human-on-the-loop compliance requirement.
 
-**4. Layered detection — not "AI judging AI"**
-The flagging engine has four layers. The first three — rule-based, embedding similarity, and native thinking analysis — use no meta-LLM at all. The LLM judge (layer 4) fires only on steps that pass the first three, and only in full audit mode. Engineers can run in `flagging_depth="fast"` for instant, zero-cost flagging (layers 1-3 only) and opt into layer 4 for compliance audit passes. Every flag shows which layer fired it: `[rule]`, `[embedding]`, `[native]`, or `[judge]`.
+**4. Layered detection — local model by default, bring your own if you want more**
+The flagging engine has four layers. The first three — rule-based, embedding similarity, and native thinking analysis — use no model at all. Layer 4 (the LLM judge) defaults to a **local Ollama model** (`llama3.2` by default): zero API cost, fully offline, no data leaves your machine. If Ollama isn't running, layer 4 is silently skipped — no error, no cost.
+
+For teams that want higher-accuracy judgment on ambiguous steps: bring your own API key (`RECUT_L4_BACKEND=anthropic|openai`). A configurable remote call limit (`RECUT_L4_REMOTE_MAX_PCT`, default 20%) ensures at most 20% of steps in a trace escalate to the remote API. The rest use the local Ollama model. Cost stays bounded and predictable; the limit is configurable per deployment.
+
+Every flag shows which layer fired it: `[rule]`, `[embedding]`, `[native]`, or `[judge]`. Engineers can skip layer 4 entirely with `flagging_depth="fast"` for instant, zero-model flagging.
 
 **5. Behavioral fingerprinting from your own history**
 After enough runs, recut builds a per-agent statistical baseline from traces in your local store. New runs are compared to the baseline with Z-score anomaly detection — no model, no API, no opinion. "This run used 3.1σ more tool calls than baseline" is a deterministic mathematical signal.
@@ -88,6 +92,17 @@ Every flag has a `plain_reason`: *"The agent seemed unsure in its thinking but a
 
 **8. Zero ML background required**
 The entire surface — CLI, TUI, flags, audit records — is designed for product engineers. No embeddings dashboard, no loss curves, no ML jargon.
+
+**9. Works inside the frameworks you already use**
+recut is not a competing platform. It ships as a set of thin adapter packages that embed into LangChain, LangGraph, CrewAI, LlamaIndex, AutoGen, and any OpenTelemetry-instrumented stack. The behavioral flags and reasoning signal are pushed directly into LangSmith, Langfuse, Arize Phoenix, Datadog, or whatever observability backend the team already has — making those tools more useful, not redundant.
+
+| Install | What you get |
+|---|---|
+| `recut-otel` | Universal OTel span processor — works with AutoGen, Semantic Kernel, any OTel backend |
+| `recut-langgraph` | Native intercept via LangGraph `interrupt()` + replay via checkpointer |
+| `recut-langchain` | `BaseCallbackHandler` + behavioral flags posted to LangSmith as feedback |
+| `recut-langfuse` | Behavioral flag scores with `score_config` vocabulary inside Langfuse |
+| `recut-crewai` | Before/after hooks with synchronous blocking — intercept available without LangGraph |
 
 ---
 
