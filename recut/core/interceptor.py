@@ -45,6 +45,8 @@ class InterceptSession:
         self.trace.steps.append(step)
 
         for flag in flags:
+            from recut.hooks import fire_all as _fire_global
+
             event = RecutFlagEvent(
                 trace_id=self.trace.id,
                 step_id=step.id,
@@ -63,6 +65,7 @@ class InterceptSession:
                     _log.warning("recut: flag handler raised synchronously: %s", exc)
             if coros:
                 await asyncio.gather(*coros, return_exceptions=True)
+            await _fire_global(event)
 
             if self._should_pause(flag):
                 self._paused.clear()
