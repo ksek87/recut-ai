@@ -371,14 +371,16 @@ async def _layer2_embeddings_batch(
     try:
         model = _get_embedding_model()
         contents = [s.content for s in steps]
-        reasoning_contents = [s.reasoning.content if s.reasoning and s.reasoning.content else "" for s in steps]
+        reasoning_contents = [
+            s.reasoning.content if s.reasoning and s.reasoning.content else "" for s in steps
+        ]
 
         all_texts = [original_prompt] + contents + reasoning_contents
         all_embs = model.encode(all_texts, batch_size=32, show_progress_bar=False)
 
         prompt_emb = all_embs[0]
-        step_embs = all_embs[1: 1 + len(steps)]
-        reasoning_embs = all_embs[1 + len(steps):]
+        step_embs = all_embs[1 : 1 + len(steps)]
+        reasoning_embs = all_embs[1 + len(steps) :]
 
         results: dict[str, list[RecutFlag]] = {}
         for i, step in enumerate(steps):
@@ -387,32 +389,36 @@ async def _layer2_embeddings_batch(
             norm_p = np.linalg.norm(prompt_emb) * np.linalg.norm(step_emb) + 1e-10
             similarity = float(np.dot(prompt_emb, step_emb) / norm_p)
             if similarity < (1.0 - threshold):
-                flags.append(RecutFlag(
-                    type=FlagType.GOAL_DRIFT,
-                    severity=Severity.MEDIUM,
-                    plain_reason=(
-                        "The agent's response seems to have drifted away from the original task. "
-                        f"Similarity to the original goal: {similarity:.0%}."
-                    ),
-                    step_id=step.id,
-                    source=FlagSource.EMBEDDING,
-                ))
+                flags.append(
+                    RecutFlag(
+                        type=FlagType.GOAL_DRIFT,
+                        severity=Severity.MEDIUM,
+                        plain_reason=(
+                            "The agent's response seems to have drifted away from the original task. "
+                            f"Similarity to the original goal: {similarity:.0%}."
+                        ),
+                        step_id=step.id,
+                        source=FlagSource.EMBEDDING,
+                    )
+                )
             r_content = reasoning_contents[i]
             if r_content:
                 r_emb = reasoning_embs[i]
                 norm_ra = np.linalg.norm(r_emb) * np.linalg.norm(step_emb) + 1e-10
                 ra_sim = float(np.dot(r_emb, step_emb) / norm_ra)
                 if ra_sim < (1.0 - threshold):
-                    flags.append(RecutFlag(
-                        type=FlagType.REASONING_ACTION_MISMATCH,
-                        severity=Severity.MEDIUM,
-                        plain_reason=(
-                            "The agent's reasoning and its actual action don't seem closely related. "
-                            "It may have reasoned about one thing and done another."
-                        ),
-                        step_id=step.id,
-                        source=FlagSource.EMBEDDING,
-                    ))
+                    flags.append(
+                        RecutFlag(
+                            type=FlagType.REASONING_ACTION_MISMATCH,
+                            severity=Severity.MEDIUM,
+                            plain_reason=(
+                                "The agent's reasoning and its actual action don't seem closely related. "
+                                "It may have reasoned about one thing and done another."
+                            ),
+                            step_id=step.id,
+                            source=FlagSource.EMBEDDING,
+                        )
+                    )
             if flags:
                 results[step.id] = flags
         return results
@@ -496,7 +502,7 @@ async def _layer4_llm_judge(
                 return []
         except anthropic.APIConnectionError:
             if attempt < 2:
-                await asyncio.sleep(2 ** attempt)
+                await asyncio.sleep(2**attempt)
             else:
                 _log.warning("recut: Layer 4 connection error after 3 attempts, skipping")
                 return []

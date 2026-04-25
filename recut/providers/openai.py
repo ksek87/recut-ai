@@ -37,9 +37,7 @@ class OpenAIProvider(AbstractProvider):
     ):
         self.model = model
         self.infer_reasoning = infer_reasoning
-        _timeout = httpx.Timeout(
-            float(os.environ.get("RECUT_API_TIMEOUT", "60")), connect=10.0
-        )
+        _timeout = httpx.Timeout(float(os.environ.get("RECUT_API_TIMEOUT", "60")), connect=10.0)
         self._client = _openai.AsyncOpenAI(
             api_key=api_key or os.environ.get("OPENAI_API_KEY"),
             timeout=_timeout,

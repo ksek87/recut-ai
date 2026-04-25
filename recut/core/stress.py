@@ -148,7 +148,9 @@ async def stress(
             except Exception as exc:
                 _log.warning(
                     "recut: stress variant %d failed (strategy=%s): %s",
-                    variant_index, strategy.value, exc,
+                    variant_index,
+                    strategy.value,
+                    exc,
                 )
                 return None
 

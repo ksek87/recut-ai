@@ -33,9 +33,7 @@ class AnthropicProvider(AbstractProvider):
     ):
         self.model = model
         self.thinking_budget = thinking_budget
-        _timeout = httpx.Timeout(
-            float(os.environ.get("RECUT_API_TIMEOUT", "60")), connect=10.0
-        )
+        _timeout = httpx.Timeout(float(os.environ.get("RECUT_API_TIMEOUT", "60")), connect=10.0)
         self._client = anthropic.AsyncAnthropic(
             api_key=api_key or os.environ.get("ANTHROPIC_API_KEY"),
             timeout=_timeout,
@@ -113,7 +111,7 @@ class AnthropicProvider(AbstractProvider):
                     raise
             except anthropic.APIConnectionError:
                 if attempt < 2:
-                    await asyncio.sleep(2 ** attempt)
+                    await asyncio.sleep(2**attempt)
                 else:
                     raise
 
