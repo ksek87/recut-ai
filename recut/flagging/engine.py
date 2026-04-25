@@ -371,7 +371,8 @@ async def _layer4_llm_judge(
             system=FLAGGING_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}],
         )
-        raw = response.content[0].text.strip()  # type: ignore[union-attr]
+        block = response.content[0]
+        raw = block.text.strip() if hasattr(block, "text") else ""
         results = json.loads(raw)
     except Exception:
         return []

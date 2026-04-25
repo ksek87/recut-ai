@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import json
 import os
-from datetime import UTC
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from sqlmodel import Session, SQLModel, create_engine
+
+if TYPE_CHECKING:
+    from recut.schema.trace import RecutTrace
 
 from recut.storage.models import AuditRow, FlagCache, ForkRow, TraceRow  # noqa: F401
 
@@ -45,7 +50,25 @@ class StorageClient:
 
     def get_trace_row(self, trace_id: str) -> TraceRow | None:
         with self._get_session() as session:
-            return session.get(TraceRow, trace_id)
+            return session.get(TraceRow, trace_id)  # type: ignore[return-value]
+
+    def load_trace(self, trace_id: str) -> RecutTrace | None:
+        from recut.schema.trace import RecutStep, RecutTrace, TraceLanguage, TraceMeta, TraceMode
+
+        row = self.get_trace_row(trace_id)
+        if not row:
+            return None
+        steps = [RecutStep(**s) for s in json.loads(row.steps_json)]
+        return RecutTrace(
+            id=row.id,
+            created_at=row.created_at,
+            agent_id=row.agent_id,
+            prompt=row.prompt,
+            mode=TraceMode(row.mode),
+            language=TraceLanguage(row.language),
+            meta=TraceMeta(model=row.model, provider=row.provider, total_steps=len(steps)),
+            steps=steps,
+        )
 
     def save_audit_row(self, row: AuditRow) -> None:
         with self._get_session() as session:
@@ -54,7 +77,7 @@ class StorageClient:
 
     def get_audit_row(self, audit_id: str) -> AuditRow | None:
         with self._get_session() as session:
-            return session.get(AuditRow, audit_id)
+            return session.get(AuditRow, audit_id)  # type: ignore[return-value]
 
     def save_fork_row(self, row: ForkRow) -> None:
         with self._get_session() as session:
@@ -63,13 +86,11 @@ class StorageClient:
 
     def get_fork_row(self, fork_id: str) -> ForkRow | None:
         with self._get_session() as session:
-            return session.get(ForkRow, fork_id)
+            return session.get(ForkRow, fork_id)  # type: ignore[return-value]
 
     def get_cached_flags(self, content_hash: str) -> FlagCache | None:
-        from datetime import datetime
-
         with self._get_session() as session:
-            row = session.get(FlagCache, content_hash)
+            row = session.get(FlagCache, content_hash)  # type: ignore[return-value]
             if row and row.expires_at > datetime.now(UTC):
                 return row
             return None

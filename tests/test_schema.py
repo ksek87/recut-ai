@@ -330,12 +330,12 @@ class TestRecutFork:
         fork = RecutFork(
             parent_trace_id="trace-456",
             fork_step_index=3,
-            fork_type=ForkType.RED_TEAM,
+            fork_type=ForkType.STRESS_VARIANT,
             injection=sample_injection,
             replay_steps=[{"index": 3}],
             diff=diff,
         )
-        assert fork.fork_type == ForkType.RED_TEAM
+        assert fork.fork_type == ForkType.STRESS_VARIANT
         assert len(fork.replay_steps) == 1
         assert fork.diff is not None
 

@@ -30,28 +30,13 @@ async def _replay_async(
     from recut.core.replayer import replay
     from recut.providers.anthropic import AnthropicProvider
     from recut.schema.fork import ForkInjection, InjectionTarget
-    from recut.schema.trace import RecutStep, RecutTrace, TraceLanguage, TraceMeta, TraceMode
     from recut.storage.db import StorageClient
 
     client = StorageClient()
-    row = client.get_trace_row(trace_id)
-    if not row:
+    trace = client.load_trace(trace_id)
+    if not trace:
         console.print(f"[red]Trace not found:[/red] {trace_id}")
         raise typer.Exit(1)
-
-    steps_data = json.loads(row.steps_json)
-    steps = [RecutStep(**s) for s in steps_data]
-
-    trace = RecutTrace(
-        id=row.id,
-        created_at=row.created_at,
-        agent_id=row.agent_id,
-        prompt=row.prompt,
-        mode=TraceMode(row.mode),
-        language=TraceLanguage(row.language),
-        meta=TraceMeta(model=row.model, provider=row.provider),
-        steps=steps,
-    )
 
     try:
         inject_data = json.loads(inject_json)
@@ -61,7 +46,7 @@ async def _replay_async(
 
     injection = ForkInjection(
         target=InjectionTarget(inject_data.get("target", "tool_result")),
-        original_content=steps[step_index].content if step_index < len(steps) else "",
+        original_content=trace.steps[step_index].content if step_index < len(trace.steps) else "",
         injected_content=inject_data.get("injected_content", ""),
     )
 
