@@ -50,7 +50,7 @@ class StorageClient:
 
     def get_trace_row(self, trace_id: str) -> TraceRow | None:
         with self._get_session() as session:
-            return session.get(TraceRow, trace_id)  # type: ignore[return-value]
+            return session.get(TraceRow, trace_id)
 
     def load_trace(self, trace_id: str) -> RecutTrace | None:
         from recut.schema.trace import RecutStep, RecutTrace, TraceLanguage, TraceMeta, TraceMode
@@ -77,7 +77,7 @@ class StorageClient:
 
     def get_audit_row(self, audit_id: str) -> AuditRow | None:
         with self._get_session() as session:
-            return session.get(AuditRow, audit_id)  # type: ignore[return-value]
+            return session.get(AuditRow, audit_id)
 
     def save_fork_row(self, row: ForkRow) -> None:
         with self._get_session() as session:
@@ -86,11 +86,11 @@ class StorageClient:
 
     def get_fork_row(self, fork_id: str) -> ForkRow | None:
         with self._get_session() as session:
-            return session.get(ForkRow, fork_id)  # type: ignore[return-value]
+            return session.get(ForkRow, fork_id)
 
     def get_cached_flags(self, content_hash: str) -> FlagCache | None:
         with self._get_session() as session:
-            row = session.get(FlagCache, content_hash)  # type: ignore[return-value]
+            row = session.get(FlagCache, content_hash)
             if row and row.expires_at > datetime.now(UTC):
                 return row
             return None
