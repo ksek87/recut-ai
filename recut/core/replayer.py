@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 
 from recut.flagging.engine import FlaggingEngine
 from recut.plain.summariser import summarise_step
@@ -11,6 +12,8 @@ from recut.schema.trace import RecutStep, RecutTrace
 from recut.storage.circuit_breaker import is_open, record_failure, record_success
 from recut.storage.db import StorageClient
 from recut.storage.models import ForkRow
+
+_log = logging.getLogger(__name__)
 
 
 async def replay(
@@ -33,10 +36,9 @@ async def replay(
     )
 
     engine = FlaggingEngine(mode=trace.mode)
-    for i, step in enumerate(replayed_steps):
-        preceding = replayed_steps[max(0, i - 2) : i]
-        flags = await engine.score_step(step, preceding, trace.prompt)
-        step.flags = flags
+    results = await engine.score_batch(replayed_steps, trace.prompt)
+    for step in replayed_steps:
+        step.flags = results.get(step.id, [])
         step.plain_summary = summarise_step(step, trace.language)
 
     fork = RecutFork(
