@@ -8,6 +8,9 @@ import os
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
+import anthropic
+import openai
+
 from recut.flagging.flags import (
     CONFIDENCE_PHRASES,
     UNCERTAINTY_PHRASES,
@@ -449,12 +452,8 @@ def _get_l4_client(backend: str) -> Any:
 
         timeout = httpx.Timeout(float(os.environ.get("RECUT_API_TIMEOUT", "30")))
         if backend == "anthropic":
-            import anthropic
-
             _l4_clients[backend] = anthropic.AsyncAnthropic(timeout=timeout)
         else:
-            import openai
-
             base_url = (
                 os.environ.get("RECUT_L4_LOCAL_URL", "http://localhost:11434/v1")
                 if backend == "local"
@@ -506,9 +505,6 @@ async def _layer4_llm_judge(
     original_prompt: str,
 ) -> list[RecutFlag]:
     """Call the configured meta-LLM to judge multiple steps in one batched request."""
-    import anthropic
-    import openai
-
     backend = os.environ.get("RECUT_L4_BACKEND", "local").lower()
     if backend not in _L4_VALID_BACKENDS:
         _log.warning("recut: Unknown RECUT_L4_BACKEND=%r, defaulting to local", backend)

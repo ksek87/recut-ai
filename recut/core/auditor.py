@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-import logging
 from typing import Literal
 
 from recut.flagging.engine import FlaggingEngine
+from recut.hooks import fire_all, has_handlers
 from recut.plain.summariser import flag_suggested_action, summarise_step, summarise_trace
 from recut.schema.audit import AuditMode, AuditRecord, ReviewStatus, RiskProfile
 from recut.schema.hooks import RecutFlagEvent
 from recut.schema.trace import FlagType, RecutFlag, RecutTrace, Severity, TraceMode
-
-_log = logging.getLogger(__name__)
 
 
 async def peek(
@@ -41,25 +39,24 @@ async def audit(
 
 async def _score_trace_steps(trace: RecutTrace, engine: FlaggingEngine) -> None:
     """Score all steps in the trace using the given engine, mutating in-place."""
-    from recut.hooks import fire_all, get_all
-
     results = await engine.score_batch(trace.steps, trace.prompt)
-    global_handlers = get_all()
+    _fire = has_handlers()
 
-    for step in trace.steps:
+    for i, step in enumerate(trace.steps):
         flags = results.get(step.id, [])
         step.flags = flags
         step.risk_score = _compute_risk_score(flags)
         step.plain_summary = summarise_step(step, trace.language)
 
-        if global_handlers and flags:
+        if _fire and flags:
+            preceding = trace.steps[max(0, i - 2) : i]
             for flag in flags:
                 event = RecutFlagEvent(
                     trace_id=trace.id,
                     step_id=step.id,
                     flag=flag,
                     suggested_action=flag_suggested_action(flag),
-                    preceding_steps=[],
+                    preceding_steps=preceding,
                     agent_id=trace.agent_id,
                 )
                 await fire_all(event)

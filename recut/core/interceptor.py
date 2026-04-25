@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator, Coroutine
 from typing import Any
 
 from recut.flagging.engine import FlaggingEngine
+from recut.hooks import fire_all as _fire_global
 from recut.plain.summariser import flag_suggested_action, summarise_step
 from recut.schema.hooks import FlagHandler, RecutFlagEvent
 from recut.schema.trace import RecutFlag, RecutStep, RecutTrace, TraceMode
@@ -45,8 +46,6 @@ class InterceptSession:
         self.trace.steps.append(step)
 
         for flag in flags:
-            from recut.hooks import fire_all as _fire_global
-
             event = RecutFlagEvent(
                 trace_id=self.trace.id,
                 step_id=step.id,

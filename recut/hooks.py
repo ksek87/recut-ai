@@ -26,17 +26,20 @@ def get_all() -> list[tuple[FlagHandler, dict[str, Any]]]:
     return list(_registry)
 
 
+def has_handlers() -> bool:
+    return bool(_registry)
+
+
 def matches(event: RecutFlagEvent, filters: dict[str, Any]) -> bool:
-    return not (
-        ((sev := filters.get("severity")) and event.flag.severity.value != sev)
-        or ((ft := filters.get("flag_type")) and event.flag.type.value != ft)
-    )
+    sev = filters.get("severity")
+    ft = filters.get("flag_type")
+    return (not sev or event.flag.severity.value == sev) and (not ft or event.flag.type.value == ft)
 
 
 async def fire_all(event: RecutFlagEvent) -> None:
     """Fire all registered global handlers whose filters match the event."""
     coros: list[Coroutine[Any, Any, Any]] = []
-    for handler, filters in _registry:
+    for handler, filters in list(_registry):  # snapshot to allow mutation during iteration
         if matches(event, filters):
             try:
                 result = handler(event)
