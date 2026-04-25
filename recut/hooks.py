@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Coroutine
 from typing import Any
 
 from recut.schema.hooks import FlagHandler, RecutFlagEvent
@@ -34,7 +35,7 @@ def matches(event: RecutFlagEvent, filters: dict[str, Any]) -> bool:
 
 async def fire_all(event: RecutFlagEvent) -> None:
     """Fire all registered global handlers whose filters match the event."""
-    coros = []
+    coros: list[Coroutine[Any, Any, Any]] = []
     for handler, filters in _registry:
         if matches(event, filters):
             try:
