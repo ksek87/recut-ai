@@ -6,7 +6,6 @@ Tests for P0 release blocker features:
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -24,8 +23,8 @@ from recut.schema.trace import (
     RecutTrace,
     Severity,
     StepType,
-    TraceMeta,
     TraceLanguage,
+    TraceMeta,
     TraceMode,
 )
 
@@ -139,7 +138,7 @@ class TestByomClientFactory:
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
         with patch("openai.AsyncOpenAI") as mock_cls:
             mock_cls.return_value = MagicMock()
-            client = _get_l4_client("openai")
+            _get_l4_client("openai")
             mock_cls.assert_called_once()
             call_kwargs = mock_cls.call_args.kwargs
             assert "base_url" not in call_kwargs or call_kwargs.get("base_url") is None
@@ -256,12 +255,14 @@ class TestByomLlmJudge:
         monkeypatch.setenv("RECUT_L4_BACKEND", "local")
         step = _make_step(0)
 
-        with patch(
-            "recut.flagging.engine._call_l4_api",
-            side_effect=openai.APIConnectionError(request=MagicMock()),
+        with (
+            patch(
+                "recut.flagging.engine._call_l4_api",
+                side_effect=openai.APIConnectionError(request=MagicMock()),
+            ),
+            caplog.at_level(logging.DEBUG, logger="recut.flagging.engine"),
         ):
-            with caplog.at_level(logging.DEBUG, logger="recut.flagging.engine"):
-                result = await _layer4_llm_judge([step], "prompt")
+            result = await _layer4_llm_judge([step], "prompt")
 
         assert result == []
         assert "local backend unreachable" in caplog.text
@@ -274,17 +275,19 @@ class TestByomLlmJudge:
         monkeypatch.setenv("RECUT_L4_BACKEND", "anthropic")
         step = _make_step(0)
 
-        with patch(
-            "recut.flagging.engine._call_l4_api",
-            side_effect=anthropic.RateLimitError(
-                message="rate limited",
-                response=MagicMock(status_code=429),
-                body={},
+        with (
+            patch(
+                "recut.flagging.engine._call_l4_api",
+                side_effect=anthropic.RateLimitError(
+                    message="rate limited",
+                    response=MagicMock(status_code=429),
+                    body={},
+                ),
             ),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+            caplog.at_level(logging.WARNING, logger="recut.flagging.engine"),
         ):
-            with patch("asyncio.sleep", new_callable=AsyncMock):
-                with caplog.at_level(logging.WARNING, logger="recut.flagging.engine"):
-                    result = await _layer4_llm_judge([step], "prompt")
+            result = await _layer4_llm_judge([step], "prompt")
 
         assert result == []
         assert "rate-limited" in caplog.text
@@ -297,16 +300,18 @@ class TestByomLlmJudge:
         monkeypatch.setenv("RECUT_L4_BACKEND", "anthropic")
         step = _make_step(0)
 
-        with patch(
-            "recut.flagging.engine._call_l4_api",
-            side_effect=anthropic.AuthenticationError(
-                message="auth error",
-                response=MagicMock(status_code=401),
-                body={},
+        with (
+            patch(
+                "recut.flagging.engine._call_l4_api",
+                side_effect=anthropic.AuthenticationError(
+                    message="auth error",
+                    response=MagicMock(status_code=401),
+                    body={},
+                ),
             ),
+            caplog.at_level(logging.WARNING, logger="recut.flagging.engine"),
         ):
-            with caplog.at_level(logging.WARNING, logger="recut.flagging.engine"):
-                result = await _layer4_llm_judge([step], "prompt")
+            result = await _layer4_llm_judge([step], "prompt")
 
         assert result == []
         assert "auth error" in caplog.text
