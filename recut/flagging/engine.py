@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import logging
 import os
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from recut.flagging.flags import (
@@ -22,6 +24,8 @@ from recut.schema.trace import (
     StepType,
     TraceMode,
 )
+
+_log = logging.getLogger(__name__)
 
 
 class FlaggingEngine:
@@ -103,9 +107,9 @@ class FlaggingEngine:
         steps: list[RecutStep],
         original_prompt: str,
     ) -> dict[str, list[RecutFlag]]:
-        """Score multiple steps at once. Layer 4 batches these into one LLM call."""
+        """Score multiple steps at once. Layers 1+3 per-step; Layer 2 batch-encoded; Layer 4 one LLM call."""
         results: dict[str, list[RecutFlag]] = {}
-
+        embedding_candidates: list[RecutStep] = []
         llm_candidates: list[RecutStep] = []
 
         for i, step in enumerate(steps):
@@ -134,12 +138,26 @@ class FlaggingEngine:
                 results[step.id] = step_flags
                 await _cache_flags(cache_key, step_flags)
             else:
-                llm_candidates.append(step)
+                if self._use_embeddings:
+                    embedding_candidates.append(step)
+                else:
+                    llm_candidates.append(step)
 
-        # Batch the LLM judge call for all candidates at once
+        # Layer 2 — batch-encode all embedding candidates at once
+        if embedding_candidates:
+            emb_results = await _layer2_embeddings_batch(embedding_candidates, original_prompt)
+            for step in embedding_candidates:
+                flags = emb_results.get(step.id, [])
+                if flags:
+                    results[step.id] = flags
+                    preceding = steps[max(0, step.index - 2) : step.index]
+                    await _cache_flags(_cache_key(step, preceding), flags)
+                else:
+                    llm_candidates.append(step)
+
+        # Layer 4 — batch the LLM judge call for all remaining candidates
         if llm_candidates and self._use_llm_judge:
             llm_results = await _layer4_llm_judge(llm_candidates, original_prompt)
-            # llm_results is a flat list — assign back by step_id in flag.step_id
             for flag in llm_results:
                 results.setdefault(flag.step_id, []).append(flag)
 
@@ -331,6 +349,96 @@ def _get_embedding_model() -> Any:
 
 
 # ---------------------------------------------------------------------------
+# Layer 2 — Batch variant (used by score_batch)
+# ---------------------------------------------------------------------------
+
+
+async def _layer2_embeddings_batch(
+    steps: list[RecutStep],
+    original_prompt: str,
+) -> dict[str, list[RecutFlag]]:
+    """Batch-encode all steps in one model.encode() call for score_batch paths."""
+    try:
+        import numpy as np
+    except ImportError:
+        return {}
+
+    if not steps:
+        return {}
+
+    threshold = float(os.environ.get("RECUT_EMBEDDING_THRESHOLD", "0.75"))
+
+    try:
+        model = _get_embedding_model()
+        contents = [s.content for s in steps]
+        reasoning_contents = [s.reasoning.content if s.reasoning and s.reasoning.content else "" for s in steps]
+
+        all_texts = [original_prompt] + contents + reasoning_contents
+        all_embs = model.encode(all_texts, batch_size=32, show_progress_bar=False)
+
+        prompt_emb = all_embs[0]
+        step_embs = all_embs[1: 1 + len(steps)]
+        reasoning_embs = all_embs[1 + len(steps):]
+
+        results: dict[str, list[RecutFlag]] = {}
+        for i, step in enumerate(steps):
+            flags: list[RecutFlag] = []
+            step_emb = step_embs[i]
+            norm_p = np.linalg.norm(prompt_emb) * np.linalg.norm(step_emb) + 1e-10
+            similarity = float(np.dot(prompt_emb, step_emb) / norm_p)
+            if similarity < (1.0 - threshold):
+                flags.append(RecutFlag(
+                    type=FlagType.GOAL_DRIFT,
+                    severity=Severity.MEDIUM,
+                    plain_reason=(
+                        "The agent's response seems to have drifted away from the original task. "
+                        f"Similarity to the original goal: {similarity:.0%}."
+                    ),
+                    step_id=step.id,
+                    source=FlagSource.EMBEDDING,
+                ))
+            r_content = reasoning_contents[i]
+            if r_content:
+                r_emb = reasoning_embs[i]
+                norm_ra = np.linalg.norm(r_emb) * np.linalg.norm(step_emb) + 1e-10
+                ra_sim = float(np.dot(r_emb, step_emb) / norm_ra)
+                if ra_sim < (1.0 - threshold):
+                    flags.append(RecutFlag(
+                        type=FlagType.REASONING_ACTION_MISMATCH,
+                        severity=Severity.MEDIUM,
+                        plain_reason=(
+                            "The agent's reasoning and its actual action don't seem closely related. "
+                            "It may have reasoned about one thing and done another."
+                        ),
+                        step_id=step.id,
+                        source=FlagSource.EMBEDDING,
+                    ))
+            if flags:
+                results[step.id] = flags
+        return results
+    except Exception:
+        return {}
+
+
+# ---------------------------------------------------------------------------
+# Module-level meta-LLM client (reused across calls)
+# ---------------------------------------------------------------------------
+
+_meta_client: Any = None
+
+
+def _get_meta_client() -> Any:
+    global _meta_client
+    if _meta_client is None:
+        import anthropic
+        import httpx
+
+        timeout = httpx.Timeout(float(os.environ.get("RECUT_API_TIMEOUT", "30")))
+        _meta_client = anthropic.AsyncAnthropic(timeout=timeout)
+    return _meta_client
+
+
+# ---------------------------------------------------------------------------
 # Layer 4 — Batched LLM judge
 # ---------------------------------------------------------------------------
 
@@ -363,18 +471,50 @@ async def _layer4_llm_judge(
         steps_json=steps_payload,
     )
 
+    raw = ""
+    for attempt in range(3):
+        try:
+            response = await _get_meta_client().messages.create(
+                model=meta_model,
+                max_tokens=2000,
+                system=FLAGGING_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            if not response.content:
+                return []
+            block = response.content[0]
+            raw = block.text.strip() if hasattr(block, "text") else ""
+            return _parse_llm_flags(raw, steps)
+        except anthropic.AuthenticationError as exc:
+            _log.warning("recut: Layer 4 auth error — check RECUT_META_MODEL key: %s", exc)
+            return []
+        except anthropic.RateLimitError:
+            if attempt < 2:
+                await asyncio.sleep(5 * (attempt + 1))
+            else:
+                _log.warning("recut: Layer 4 rate-limited after 3 attempts, skipping")
+                return []
+        except anthropic.APIConnectionError:
+            if attempt < 2:
+                await asyncio.sleep(2 ** attempt)
+            else:
+                _log.warning("recut: Layer 4 connection error after 3 attempts, skipping")
+                return []
+        except json.JSONDecodeError as exc:
+            _log.warning("recut: Layer 4 returned non-JSON (%.80s…): %s", raw, exc)
+            return []
+        except Exception as exc:
+            _log.warning("recut: Layer 4 unexpected error: %s", exc)
+            return []
+    return []
+
+
+def _parse_llm_flags(raw: str, steps: list[RecutStep]) -> list[RecutFlag]:
+    """Parse the JSON response from the LLM judge into RecutFlag objects."""
     try:
-        client = anthropic.AsyncAnthropic()
-        response = await client.messages.create(
-            model=meta_model,
-            max_tokens=2000,
-            system=FLAGGING_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        block = response.content[0]
-        raw = block.text.strip() if hasattr(block, "text") else ""
         results = json.loads(raw)
-    except Exception:
+    except json.JSONDecodeError as exc:
+        _log.warning("recut: Layer 4 returned non-JSON (%.80s…): %s", raw, exc)
         return []
 
     flags: list[RecutFlag] = []
@@ -424,6 +564,9 @@ async def _layer4_llm_judge(
 # Caching helpers
 # ---------------------------------------------------------------------------
 
+# L1 in-memory cache: content_hash -> (flags, expires_at)
+_mem_cache: dict[str, tuple[list[RecutFlag], datetime]] = {}
+
 
 def _cache_key(step: RecutStep, preceding: list[RecutStep]) -> str:
     context = step.content + "".join(p.content for p in preceding[-2:])
@@ -433,41 +576,53 @@ def _cache_key(step: RecutStep, preceding: list[RecutStep]) -> str:
 async def _get_cached_flags(content_hash: str) -> list[RecutFlag] | None:
     if os.environ.get("RECUT_CACHE_ENABLED", "true").lower() != "true":
         return None
-    try:
-        import asyncio
 
+    # L1: check in-memory first (no I/O)
+    entry = _mem_cache.get(content_hash)
+    if entry is not None:
+        flags, expires_at = entry
+        if datetime.now(UTC) < expires_at:
+            return flags
+        del _mem_cache[content_hash]
+
+    try:
         from recut.storage.db import StorageClient
 
         client = StorageClient()
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         row = await loop.run_in_executor(None, client.get_cached_flags, content_hash)
         if row is None:
             return None
         data = json.loads(row.flags_json)
         return [RecutFlag(**f) for f in data]
-    except Exception:
+    except Exception as exc:
+        _log.debug("recut: flag cache read error: %s", exc)
         return None
 
 
 async def _cache_flags(content_hash: str, flags: list[RecutFlag]) -> None:
     if os.environ.get("RECUT_CACHE_ENABLED", "true").lower() != "true":
         return
-    try:
-        import asyncio
 
+    ttl = int(os.environ.get("RECUT_CACHE_TTL", "3600"))
+    expires_at = datetime.now(UTC) + timedelta(seconds=ttl)
+
+    # Populate L1 cache immediately (no I/O)
+    _mem_cache[content_hash] = (flags, expires_at)
+
+    try:
         from recut.storage.db import StorageClient
         from recut.storage.models import FlagCache
 
-        ttl = int(os.environ.get("RECUT_CACHE_TTL", "3600"))
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         row = FlagCache(
             content_hash=content_hash,
             flags_json=json.dumps([f.model_dump(mode="json") for f in flags]),
             created_at=now,
-            expires_at=now + timedelta(seconds=ttl),
+            expires_at=expires_at,
         )
         client = StorageClient()
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, client.save_flag_cache, row)
-    except Exception:
-        pass
+    except Exception as exc:
+        _log.debug("recut: flag cache write error: %s", exc)
