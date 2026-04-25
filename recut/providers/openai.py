@@ -4,6 +4,7 @@ import json
 import os
 from collections.abc import AsyncIterator
 
+import httpx
 import openai as _openai
 
 from recut.providers.base import AbstractProvider
@@ -36,7 +37,11 @@ class OpenAIProvider(AbstractProvider):
     ):
         self.model = model
         self.infer_reasoning = infer_reasoning
-        self._client = _openai.AsyncOpenAI(api_key=api_key or os.environ.get("OPENAI_API_KEY"))
+        _timeout = httpx.Timeout(float(os.environ.get("RECUT_API_TIMEOUT", "60")), connect=10.0)
+        self._client = _openai.AsyncOpenAI(
+            api_key=api_key or os.environ.get("OPENAI_API_KEY"),
+            timeout=_timeout,
+        )
 
     def supports_native_reasoning(self) -> bool:
         return False
@@ -61,15 +66,20 @@ class OpenAIProvider(AbstractProvider):
         )
 
     async def _infer_reasoning(self, content: str) -> StepReasoning:
-        response = await self._client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": _INFERRED_REASONING_PROMPT},
-                {"role": "user", "content": f"Response to analyze:\n{content}"},
-            ],
-            max_tokens=200,
-        )
-        inferred = response.choices[0].message.content or ""
+        try:
+            response = await self._client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": _INFERRED_REASONING_PROMPT},
+                    {"role": "user", "content": f"Response to analyze:\n{content}"},
+                ],
+                max_tokens=200,
+            )
+            if not response.choices:
+                raise ValueError("empty choices")
+            inferred = response.choices[0].message.content or ""
+        except Exception:
+            inferred = ""
         return StepReasoning(
             source=ReasoningSource.INFERRED,
             content=inferred,
@@ -96,6 +106,8 @@ class OpenAIProvider(AbstractProvider):
 
         step_index = 0
         response = await self._client.chat.completions.create(**kwargs)
+        if not response.choices:
+            return
         choice = response.choices[0]
 
         if choice.message.tool_calls:

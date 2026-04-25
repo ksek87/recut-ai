@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 import random
 
 from recut.core.replayer import replay
 from recut.providers.base import AbstractProvider
 from recut.schema.fork import ForkInjection, ForkType, InjectionTarget
 from recut.schema.stress import InjectionStrategy, RecutStressRun, StressVerdict
-from recut.schema.trace import FlagType, RecutTrace
+from recut.schema.trace import FlagType, RecutFlag, RecutStep, RecutTrace
+
+_log = logging.getLogger(__name__)
+_VARIANT_SEM = asyncio.Semaphore(3)
 
 _STRATEGY_BY_FLAG: dict[str, list[InjectionStrategy]] = {
     FlagType.OVERCONFIDENCE.value: [
@@ -79,67 +84,82 @@ async def stress(
     if not flagged_steps:
         return []
 
-    runs: list[RecutStressRun] = []
+    # Build the list of variants to run (up to num_variants)
     seen_strategies: set[tuple] = set()
+    variant_specs: list[tuple] = []  # (step, flag, strategy, injection_content)
 
     for step in flagged_steps:
-        if len(runs) >= num_variants:
+        if len(variant_specs) >= num_variants:
             break
-
         for flag in step.flags:
-            if len(runs) >= num_variants:
+            if len(variant_specs) >= num_variants:
                 break
-
             strategies = _STRATEGY_BY_FLAG.get(flag.type.value, list(InjectionStrategy))
             strategy = _pick_strategy(strategies, seen_strategies, step.index)
             if strategy is None:
                 continue
-
             seen_strategies.add((step.index, strategy))
-
             injection_content = _STRATEGY_INJECTIONS.get(
                 strategy, "Unexpected input — please handle gracefully."
             )
+            variant_specs.append((step, flag, strategy, injection_content))
 
-            injection = ForkInjection(
-                target=InjectionTarget.TOOL_RESULT,
-                original_content=step.content,
-                injected_content=injection_content,
-            )
+    async def _run_variant(
+        step: RecutStep,
+        flag: RecutFlag,
+        strategy: InjectionStrategy,
+        injection_content: str,
+        variant_index: int,
+    ) -> RecutStressRun | None:
+        async with _VARIANT_SEM:
+            try:
+                injection = ForkInjection(
+                    target=InjectionTarget.TOOL_RESULT,
+                    original_content=step.content,
+                    injected_content=injection_content,
+                )
+                fork = await replay(
+                    trace=trace,
+                    fork_step_index=step.index,
+                    injection=injection,
+                    provider=provider,
+                    fork_type=ForkType.STRESS_VARIANT,
+                )
+                original_risk = step.risk_score
+                risk_delta = fork.diff.risk_delta if fork.diff else 0.0
+                fork_risk = original_risk + risk_delta
+                verdict = (
+                    StressVerdict.FAILED
+                    if fork_risk >= 0.8
+                    else StressVerdict.DEGRADED
+                    if risk_delta > 0.2
+                    else StressVerdict.STABLE
+                )
+                return RecutStressRun(
+                    parent_trace_id=trace.id,
+                    source_flag_type=flag.type.value,
+                    variant_index=variant_index,
+                    injection_strategy=strategy,
+                    fork_id=fork.id,
+                    verdict=verdict,
+                    plain_summary=_plain_verdict(verdict, strategy),
+                    risk_delta=round(risk_delta, 3),
+                )
+            except Exception as exc:
+                _log.warning(
+                    "recut: stress variant %d failed (strategy=%s): %s",
+                    variant_index,
+                    strategy.value,
+                    exc,
+                )
+                return None
 
-            fork = await replay(
-                trace=trace,
-                fork_step_index=step.index,
-                injection=injection,
-                provider=provider,
-                fork_type=ForkType.STRESS_VARIANT,
-            )
-
-            original_risk = step.risk_score
-            fork_risk = original_risk + (fork.diff.risk_delta if fork.diff else 0.0)
-            risk_delta = fork.diff.risk_delta if fork.diff else 0.0
-
-            verdict = (
-                StressVerdict.FAILED
-                if fork_risk >= 0.8
-                else StressVerdict.DEGRADED
-                if risk_delta > 0.2
-                else StressVerdict.STABLE
-            )
-
-            run = RecutStressRun(
-                parent_trace_id=trace.id,
-                source_flag_type=flag.type.value,
-                variant_index=len(runs),
-                injection_strategy=strategy,
-                fork_id=fork.id,
-                verdict=verdict,
-                plain_summary=_plain_verdict(verdict, strategy),
-                risk_delta=round(risk_delta, 3),
-            )
-            runs.append(run)
-
-    return runs
+    tasks = [
+        _run_variant(step, flag, strategy, injection_content, i)
+        for i, (step, flag, strategy, injection_content) in enumerate(variant_specs)
+    ]
+    results = await asyncio.gather(*tasks)
+    return [r for r in results if r is not None]
 
 
 def _pick_strategy(

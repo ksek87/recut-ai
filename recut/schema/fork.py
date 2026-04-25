@@ -10,7 +10,6 @@ from pydantic import BaseModel, Field
 class ForkType(StrEnum):
     MANUAL = "manual"
     STRESS_VARIANT = "stress_variant"
-    RED_TEAM = "red_team"
 
 
 class InjectionTarget(StrEnum):

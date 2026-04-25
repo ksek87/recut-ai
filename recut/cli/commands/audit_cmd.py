@@ -20,30 +20,15 @@ def audit_cmd(
 
 
 async def _audit_async(trace_id: str, *, tui: bool = False) -> None:
-    import json
-
     from recut.cli.tui.audit_view import AuditView
     from recut.core.auditor import audit
-    from recut.schema.trace import RecutStep, RecutTrace, TraceLanguage, TraceMeta, TraceMode
     from recut.storage.db import StorageClient
 
     client = StorageClient()
-    row = client.get_trace_row(trace_id)
-    if not row:
+    trace = client.load_trace(trace_id)
+    if not trace:
         console.print(f"[red]Trace not found:[/red] {trace_id}")
         raise typer.Exit(1)
-
-    steps = [RecutStep(**s) for s in json.loads(row.steps_json)]
-    trace = RecutTrace(
-        id=row.id,
-        created_at=row.created_at,
-        agent_id=row.agent_id,
-        prompt=row.prompt,
-        mode=TraceMode(row.mode),
-        language=TraceLanguage(row.language),
-        meta=TraceMeta(model=row.model, provider=row.provider, total_steps=len(steps)),
-        steps=steps,
-    )
 
     record = await audit(trace)
 

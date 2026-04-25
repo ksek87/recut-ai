@@ -1,38 +1,45 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from recut.flagging.engine import FlaggingEngine
 from recut.plain.summariser import summarise_step, summarise_trace
 from recut.schema.audit import AuditMode, AuditRecord, ReviewStatus, RiskProfile
 from recut.schema.trace import FlagType, RecutFlag, RecutTrace, Severity, TraceMode
 
 
-async def peek(trace: RecutTrace) -> AuditRecord:
+async def peek(
+    trace: RecutTrace,
+    flagging_depth: Literal["fast", "full"] = "fast",
+) -> AuditRecord:
     """
-    Fast triage mode. Runs layers 1-3 only. Returns high-risk steps only.
-    Never hits the LLM judge — designed to be cheap and instant.
+    Fast triage mode. Defaults to layers 1-3 only (no LLM judge).
+    Pass flagging_depth="full" to include the LLM judge on ambiguous steps.
     """
-    engine = FlaggingEngine(mode=TraceMode.PEEK)
+    engine = FlaggingEngine(mode=TraceMode.PEEK, flagging_depth=flagging_depth)
     await _score_trace_steps(trace, engine)
     return _build_audit_record(trace, AuditMode.PEEK)
 
 
-async def audit(trace: RecutTrace) -> AuditRecord:
+async def audit(
+    trace: RecutTrace,
+    flagging_depth: Literal["fast", "full"] = "full",
+) -> AuditRecord:
     """
-    Full structured audit. Runs all four flagging layers.
+    Full structured audit. Defaults to all four flagging layers.
+    Pass flagging_depth="fast" to skip the LLM judge (cheaper, instant).
     Produces a complete AuditRecord suitable for compliance review.
     """
-    engine = FlaggingEngine(mode=TraceMode.AUDIT)
+    engine = FlaggingEngine(mode=TraceMode.AUDIT, flagging_depth=flagging_depth)
     await _score_trace_steps(trace, engine)
     return _build_audit_record(trace, AuditMode.AUDIT)
 
 
 async def _score_trace_steps(trace: RecutTrace, engine: FlaggingEngine) -> None:
     """Score all steps in the trace using the given engine, mutating in-place."""
-
-    for i, step in enumerate(trace.steps):
-        preceding = trace.steps[max(0, i - 2) : i]
-        flags = await engine.score_step(step, preceding, trace.prompt)
-
+    results = await engine.score_batch(trace.steps, trace.prompt)
+    for step in trace.steps:
+        flags = results.get(step.id, [])
         step.flags = flags
         step.risk_score = _compute_risk_score(flags)
         step.plain_summary = summarise_step(step, trace.language)

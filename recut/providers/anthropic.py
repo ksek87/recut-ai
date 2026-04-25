@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 from collections.abc import AsyncIterator
 
 import anthropic
+import httpx
 
 from recut.providers.base import AbstractProvider
 from recut.schema.trace import (
@@ -31,8 +33,10 @@ class AnthropicProvider(AbstractProvider):
     ):
         self.model = model
         self.thinking_budget = thinking_budget
+        _timeout = httpx.Timeout(float(os.environ.get("RECUT_API_TIMEOUT", "60")), connect=10.0)
         self._client = anthropic.AsyncAnthropic(
-            api_key=api_key or os.environ.get("ANTHROPIC_API_KEY")
+            api_key=api_key or os.environ.get("ANTHROPIC_API_KEY"),
+            timeout=_timeout,
         )
 
     def supports_native_reasoning(self) -> bool:
@@ -91,7 +95,28 @@ class AnthropicProvider(AbstractProvider):
         step_index = 0
         pending_reasoning: StepReasoning | None = None
 
-        response = await self._client.messages.create(**kwargs)
+        response = None
+        for attempt in range(3):
+            try:
+                response = await self._client.messages.create(**kwargs)
+                break
+            except anthropic.AuthenticationError as exc:
+                raise RuntimeError(
+                    "ANTHROPIC_API_KEY is missing or invalid — set the environment variable and retry."
+                ) from exc
+            except anthropic.RateLimitError:
+                if attempt < 2:
+                    await asyncio.sleep(5 * (attempt + 1))
+                else:
+                    raise
+            except anthropic.APIConnectionError:
+                if attempt < 2:
+                    await asyncio.sleep(2**attempt)
+                else:
+                    raise
+
+        if response is None or not response.content:
+            return
 
         for block in response.content:
             if block.type == "thinking":
