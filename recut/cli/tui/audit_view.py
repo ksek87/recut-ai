@@ -4,9 +4,16 @@ from textual.app import App, ComposeResult
 from textual.widgets import DataTable, Footer, Header, Markdown
 
 from recut.schema.audit import AuditRecord
-from recut.schema.trace import RecutTrace, Severity
+from recut.schema.trace import FlagSource, RecutTrace, Severity
 
 _SEVERITY_ORDER = {"low": 0, "medium": 1, "high": 2}
+
+_SOURCE_LABEL: dict[FlagSource, str] = {
+    FlagSource.RULE: "[rule]",
+    FlagSource.EMBEDDING: "[embedding]",
+    FlagSource.NATIVE: "[native]",
+    FlagSource.LLM: "[judge]",
+}
 
 
 class AuditView(App):
@@ -33,7 +40,7 @@ class AuditView(App):
 
     def on_mount(self) -> None:
         table = self.query_one(DataTable)
-        table.add_columns("Step", "Type", "Risk", "Flags", "Summary")
+        table.add_columns("Step", "Type", "Risk", "Flags", "Source", "Summary")
         table.cursor_type = "row"
 
         for step in self._trace.steps:
@@ -58,11 +65,14 @@ class AuditView(App):
                 if highest == Severity.MEDIUM
                 else str(flag_count)
             )
+            sources = {_SOURCE_LABEL.get(f.source, str(f.source)) for f in step.flags}
+            source_cell = " ".join(sorted(sources)) if sources else ""
             table.add_row(
                 str(step.index),
                 str(step.type),
                 risk_markup,
                 flag_cell,
+                source_cell,
                 step.plain_summary[:60],
             )
 
@@ -74,11 +84,16 @@ class AuditView(App):
         }
         profile_lines = "\n".join(f"- **{k}**: {v}" for k, v in nonzero.items()) or "_none_"
 
+        from recut.providers._pricing import format_cost
+
+        total_cost = sum(s.token_cost for s in self._trace.steps if s.token_cost)
+        cost_line = f"  |  **Cost:** {format_cost(total_cost)}" if total_cost else ""
+
         return (
             f"## {self._trace.agent_id} — audit\n\n"
             f"{r.behavioral_summary}\n\n"
             f"**Flags:** {r.flag_count}  |  "
             f"**Status:** {r.review_status}  |  "
-            f"**Highest severity:** {r.highest_severity or 'none'}\n\n"
+            f"**Highest severity:** {r.highest_severity or 'none'}{cost_line}\n\n"
             f"### Risk profile\n\n{profile_lines}"
         )

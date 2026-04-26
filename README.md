@@ -95,6 +95,24 @@ Use `flagging_depth="fast"` to run only layers 1–3 (zero model cost, instant).
 
 ---
 
+## Configuration
+
+The most common variables:
+
+```bash
+RECUT_L4_BACKEND=local          # local (default, free) | anthropic | openai
+RECUT_L4_LOCAL_URL=http://localhost:11434/v1  # Ollama, LM Studio, vLLM, etc.
+RECUT_DEFAULT_SAMPLE_RATE=1.0   # trace fraction, e.g. 0.1 for 10% in production
+RECUT_PRICE_INPUT=3.0           # override input token price per million (your billing unit)
+RECUT_PRICE_OUTPUT=15.0         # override output token price per million
+RECUT_COST_UNIT=USD             # display label — USD, EUR, credits, etc.
+RECUT_API_TIMEOUT=60            # HTTP timeout in seconds for all API calls
+```
+
+See **[docs/configuration.md](docs/configuration.md)** for the full reference — decorator parameters, `@on_flag` filters, Layer 4 backends, pricing tables, flagging thresholds, caching, sampling, and storage.
+
+---
+
 ## Framework Adapters
 
 recut enriches your existing stack — it does not replace it. Each adapter pushes behavioral flags and reasoning signal into tools your team already uses.

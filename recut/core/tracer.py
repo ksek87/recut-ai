@@ -55,6 +55,13 @@ class RecutContext:
     def finalize(self) -> RecutTrace:
         elapsed = time.monotonic() - self._started_at
         self.trace.meta.duration_seconds = round(elapsed, 3)
+        # Aggregate token counts and cost from steps
+        token_total = sum(s.token_count for s in self.trace.steps if s.token_count)
+        cost_total = sum(s.token_cost for s in self.trace.steps if s.token_cost)
+        if token_total:
+            self.trace.meta.token_count = token_total
+        if cost_total:
+            self.trace.meta.token_cost = round(cost_total, 6)
         return self.trace
 
 
