@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import uuid
 from collections.abc import AsyncIterator
@@ -15,6 +16,25 @@ from recut.schema.trace import (
     StepReasoning,
     StepType,
 )
+
+# Pricing per million tokens (input, output) — update as models are released
+_ANTHROPIC_PRICING: dict[str, tuple[float, float]] = {
+    "claude-opus-4-7": (15.0, 75.0),
+    "claude-sonnet-4-6": (3.0, 15.0),
+    "claude-haiku-4-5-20251001": (0.80, 4.0),
+    "claude-haiku-4-5": (0.80, 4.0),
+    "claude-3-5-sonnet-20241022": (3.0, 15.0),
+    "claude-3-5-haiku-20241022": (0.80, 4.0),
+    "claude-3-opus-20240229": (15.0, 75.0),
+}
+
+
+def _anthropic_cost(model: str, input_tokens: int, output_tokens: int) -> float | None:
+    pricing = _ANTHROPIC_PRICING.get(model)
+    if pricing is None:
+        return None
+    input_price, output_price = pricing
+    return (input_tokens * input_price + output_tokens * output_price) / 1_000_000
 
 
 class AnthropicProvider(AbstractProvider):
@@ -118,6 +138,18 @@ class AnthropicProvider(AbstractProvider):
         if response is None or not response.content:
             return
 
+        usage = getattr(response, "usage", None)
+        input_tokens = getattr(usage, "input_tokens", 0) if usage else 0
+        output_tokens = getattr(usage, "output_tokens", 0) if usage else 0
+        total_tokens = input_tokens + output_tokens
+        cost = _anthropic_cost(self.model, input_tokens, output_tokens)
+
+        # Distribute token count and cost evenly across non-reasoning steps
+        non_reasoning_blocks = [b for b in response.content if b.type in ("text", "tool_use")]
+        n_steps = max(len(non_reasoning_blocks), 1)
+        per_step_tokens = total_tokens // n_steps
+        per_step_cost = cost / n_steps if cost is not None else None
+
         for block in response.content:
             if block.type == "thinking":
                 pending_reasoning = StepReasoning(
@@ -140,19 +172,21 @@ class AnthropicProvider(AbstractProvider):
                     type=StepType.OUTPUT,
                     content=block.text,
                     reasoning=pending_reasoning,
+                    token_count=per_step_tokens,
+                    token_cost_usd=per_step_cost,
                 )
                 pending_reasoning = None
                 yield step
                 step_index += 1
 
             elif block.type == "tool_use":
-                import json
-
                 step = RecutStep(
                     index=step_index,
                     type=StepType.TOOL_CALL,
                     content=json.dumps({"name": block.name, "input": block.input}),
                     reasoning=pending_reasoning,
+                    token_count=per_step_tokens,
+                    token_cost_usd=per_step_cost,
                 )
                 pending_reasoning = None
                 yield step
@@ -168,7 +202,6 @@ class AnthropicProvider(AbstractProvider):
         Reconstruct messages up to fork_index, inject modified content,
         then continue the run from that point.
         """
-
         messages = _steps_to_messages(steps[:fork_index], injection)
         prompt = messages[-1]["content"] if messages else ""
 
@@ -185,8 +218,6 @@ class AnthropicProvider(AbstractProvider):
 
 def _steps_to_messages(steps: list[RecutStep], injection: dict) -> list[dict]:
     """Convert stored steps back into the messages[] format for replay."""
-    import json
-
     messages: list[dict] = []
     for step in steps:
         if step.type == StepType.TOOL_CALL:

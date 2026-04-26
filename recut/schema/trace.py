@@ -49,6 +49,8 @@ class RecutFlag(BaseModel):
     plain_reason: str
     step_id: str
     source: FlagSource
+    confidence: float | None = None  # Layer 4 only: judge confidence in this flag (0.0–1.0)
+    evidence: str | None = None  # Layer 4 only: quoted or paraphrased evidence from the step
 
 
 class StepReasoning(BaseModel):
