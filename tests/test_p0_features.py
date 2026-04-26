@@ -565,13 +565,13 @@ class TestHandlersFiredInAllModes:
     async def test_severity_filter_respected_in_audit(self):
         from recut.core.auditor import audit
 
-        high_calls = []
-        register(lambda e: high_calls.append(e), severity="low")  # only LOW
-        # The repeated tool call flag is HIGH — should NOT fire
+        # Register a "low only" handler — the repeated-tool-call flag is HIGH,
+        # so it should NOT be delivered to this handler.
+        low_only_calls: list[RecutFlagEvent] = []
+        register(lambda e: low_only_calls.append(e), severity="low")
         register(lambda e: None, severity="high")
 
         with patch.dict("os.environ", {"RECUT_USE_EMBEDDINGS": "false"}):
             await audit(self._pre_flagged_trace(), flagging_depth="fast")
 
-        # The HIGH-severity filter should not populate high_calls
-        assert all(e.flag.severity.value == "low" for e in high_calls)
+        assert all(e.flag.severity.value == "low" for e in low_only_calls)

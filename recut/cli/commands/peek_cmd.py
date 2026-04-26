@@ -6,6 +6,8 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from recut.schema.trace import Severity
+
 app = typer.Typer(help="Quick triage of a recorded trace.")
 console = Console()
 
@@ -57,8 +59,10 @@ async def _peek_async(trace_id: str, *, tui: bool = False) -> None:
                 str(step.type),
                 str(flag.type),
                 f"[red]{flag.severity}[/red]"
-                if flag.severity == "high"
-                else f"[yellow]{flag.severity}[/yellow]",
+                if flag.severity == Severity.HIGH
+                else f"[yellow]{flag.severity}[/yellow]"
+                if flag.severity == Severity.MEDIUM
+                else str(flag.severity),
                 flag.plain_reason[:80],
             )
 

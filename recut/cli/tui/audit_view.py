@@ -6,6 +6,8 @@ from textual.widgets import DataTable, Footer, Header, Markdown
 from recut.schema.audit import AuditRecord
 from recut.schema.trace import RecutTrace, Severity
 
+_SEVERITY_ORDER = {"low": 0, "medium": 1, "high": 2}
+
 
 class AuditView(App):
     """Full walkthrough view for a completed AuditRecord."""
@@ -46,7 +48,7 @@ class AuditView(App):
             flag_count = len(step.flags)
             highest = max(
                 (f.severity for f in step.flags),
-                key=lambda s: {"low": 0, "medium": 1, "high": 2}.get(s, 0),
+                key=lambda s: _SEVERITY_ORDER.get(s, 0),
                 default=None,
             )
             flag_cell = (

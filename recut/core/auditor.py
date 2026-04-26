@@ -9,6 +9,8 @@ from recut.schema.audit import AuditMode, AuditRecord, ReviewStatus, RiskProfile
 from recut.schema.hooks import RecutFlagEvent
 from recut.schema.trace import FlagType, RecutFlag, RecutTrace, Severity, TraceMode
 
+_SEVERITY_RANK = {Severity.LOW: 1, Severity.MEDIUM: 2, Severity.HIGH: 3}
+
 
 async def peek(
     trace: RecutTrace,
@@ -74,13 +76,8 @@ def _build_audit_record(trace: RecutTrace, mode: AuditMode) -> AuditRecord:
     all_flags = [f for step in trace.steps for f in step.flags]
     profile = _build_risk_profile(all_flags)
 
-    highest: str | None = None
-    if any(f.severity == Severity.HIGH for f in all_flags):
-        highest = Severity.HIGH.value
-    elif any(f.severity == Severity.MEDIUM for f in all_flags):
-        highest = Severity.MEDIUM.value
-    elif all_flags:
-        highest = Severity.LOW.value
+    top = max((f.severity for f in all_flags), key=lambda s: _SEVERITY_RANK.get(s, 0), default=None)
+    highest = top.value if top else None
 
     return AuditRecord(
         trace_id=trace.id,

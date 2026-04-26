@@ -12,6 +12,7 @@ from recut.schema.trace import FlagType, RecutFlag, RecutStep, RecutTrace
 
 _log = logging.getLogger(__name__)
 _VARIANT_SEM = asyncio.Semaphore(3)
+_ALL_STRATEGIES = list(InjectionStrategy)
 
 _STRATEGY_BY_FLAG: dict[str, list[InjectionStrategy]] = {
     FlagType.OVERCONFIDENCE.value: [
@@ -94,7 +95,7 @@ async def stress(
         for flag in step.flags:
             if len(variant_specs) >= num_variants:
                 break
-            strategies = _STRATEGY_BY_FLAG.get(flag.type.value, list(InjectionStrategy))
+            strategies = _STRATEGY_BY_FLAG.get(flag.type.value, _ALL_STRATEGIES)
             strategy = _pick_strategy(strategies, seen_strategies, step.index)
             if strategy is None:
                 continue
