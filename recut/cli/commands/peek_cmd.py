@@ -83,6 +83,8 @@ async def _peek_async(trace_id: str, *, tui: bool = False) -> None:
 
     console.print(table)
 
-    total_cost = sum(s.token_cost_usd for s in trace.steps if s.token_cost_usd)
+    total_cost = sum(s.token_cost for s in trace.steps if s.token_cost)
     if total_cost:
-        console.print(f"[dim]Token cost: ${total_cost:.4f}[/dim]")
+        from recut.providers._pricing import format_cost
+
+        console.print(f"[dim]Token cost: {format_cost(total_cost)}[/dim]")

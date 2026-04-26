@@ -84,8 +84,10 @@ class AuditView(App):
         }
         profile_lines = "\n".join(f"- **{k}**: {v}" for k, v in nonzero.items()) or "_none_"
 
-        total_cost = sum(s.token_cost_usd for s in self._trace.steps if s.token_cost_usd)
-        cost_line = f"  |  **Cost:** ${total_cost:.4f}" if total_cost else ""
+        from recut.providers._pricing import format_cost
+
+        total_cost = sum(s.token_cost for s in self._trace.steps if s.token_cost)
+        cost_line = f"  |  **Cost:** {format_cost(total_cost)}" if total_cost else ""
 
         return (
             f"## {self._trace.agent_id} — audit\n\n"

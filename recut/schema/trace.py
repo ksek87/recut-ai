@@ -71,7 +71,7 @@ class RecutStep(BaseModel):
     plain_summary: str = ""
     fork_eligible: bool = True
     token_count: int | None = None
-    token_cost_usd: float | None = None
+    token_cost: float | None = None  # cost in the configured unit (see RECUT_COST_UNIT)
 
 
 class TraceMode(StrEnum):
@@ -94,7 +94,7 @@ class TraceMeta(BaseModel):
     total_steps: int = 0
     token_count: int | None = None
     thinking_tokens: int | None = None
-    token_cost_usd: float | None = None
+    token_cost: float | None = None  # cost in the configured unit (see RECUT_COST_UNIT)
 
 
 class RecutTrace(BaseModel):

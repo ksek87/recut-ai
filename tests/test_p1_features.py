@@ -8,8 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from recut.flagging.engine import _parse_llm_flags
-from recut.providers.anthropic import _anthropic_cost
-from recut.providers.openai import _openai_cost
+from recut.providers._pricing import ANTHROPIC_PRICING, OPENAI_PRICING, format_cost, resolve_cost
 from recut.schema.trace import (
     FlagSource,
     FlagType,
@@ -260,47 +259,82 @@ class TestFlagSourceLabels:
 # ===========================================================================
 
 
-class TestAnthropicCostFunction:
-    def test_known_model_returns_correct_cost(self) -> None:
+class TestResolveCost:
+    def test_anthropic_known_model(self) -> None:
         # claude-sonnet-4-6: $3/M input, $15/M output
-        cost = _anthropic_cost("claude-sonnet-4-6", 1_000_000, 0)
+        cost = resolve_cost(ANTHROPIC_PRICING, "claude-sonnet-4-6", 1_000_000, 0)
         assert cost == pytest.approx(3.0)
 
-    def test_output_tokens_cost(self) -> None:
-        cost = _anthropic_cost("claude-sonnet-4-6", 0, 1_000_000)
+    def test_anthropic_output_tokens(self) -> None:
+        cost = resolve_cost(ANTHROPIC_PRICING, "claude-sonnet-4-6", 0, 1_000_000)
         assert cost == pytest.approx(15.0)
 
-    def test_mixed_tokens(self) -> None:
-        cost = _anthropic_cost("claude-haiku-4-5-20251001", 500_000, 500_000)
+    def test_anthropic_mixed_tokens(self) -> None:
+        cost = resolve_cost(ANTHROPIC_PRICING, "claude-haiku-4-5-20251001", 500_000, 500_000)
         # 0.5M * 0.80 + 0.5M * 4.0 = 0.40 + 2.00 = 2.40
         assert cost == pytest.approx(2.40)
 
-    def test_unknown_model_returns_none(self) -> None:
-        assert _anthropic_cost("claude-unknown-99", 100_000, 100_000) is None
+    def test_anthropic_unknown_model_returns_none(self) -> None:
+        assert resolve_cost(ANTHROPIC_PRICING, "claude-unknown-99", 100_000, 100_000) is None
 
     def test_zero_tokens(self) -> None:
-        assert _anthropic_cost("claude-sonnet-4-6", 0, 0) == pytest.approx(0.0)
+        assert resolve_cost(ANTHROPIC_PRICING, "claude-sonnet-4-6", 0, 0) == pytest.approx(0.0)
 
-
-class TestOpenAICostFunction:
-    def test_gpt4o_cost(self) -> None:
-        cost = _openai_cost("gpt-4o", 1_000_000, 0)
+    def test_openai_gpt4o_cost(self) -> None:
+        cost = resolve_cost(OPENAI_PRICING, "gpt-4o", 1_000_000, 0)
         assert cost == pytest.approx(2.50)
 
-    def test_gpt4o_mini_cost(self) -> None:
-        cost = _openai_cost("gpt-4o-mini", 0, 1_000_000)
+    def test_openai_gpt4o_mini_cost(self) -> None:
+        cost = resolve_cost(OPENAI_PRICING, "gpt-4o-mini", 0, 1_000_000)
         assert cost == pytest.approx(0.60)
 
-    def test_strips_date_suffix(self) -> None:
-        cost_base = _openai_cost("gpt-4o", 100_000, 50_000)
-        cost_dated = _openai_cost("gpt-4o-2024-11-20", 100_000, 50_000)
+    def test_openai_strips_date_suffix(self) -> None:
+        cost_base = resolve_cost(OPENAI_PRICING, "gpt-4o", 100_000, 50_000)
+        cost_dated = resolve_cost(
+            OPENAI_PRICING, "gpt-4o-2024-11-20", 100_000, 50_000, strip_date_suffix=True
+        )
         assert cost_base == pytest.approx(cost_dated)
 
-    def test_unknown_model_returns_none(self) -> None:
-        assert _openai_cost("gpt-99-ultra", 100_000, 100_000) is None
+    def test_openai_unknown_model_returns_none(self) -> None:
+        assert resolve_cost(OPENAI_PRICING, "gpt-99-ultra", 100_000, 100_000) is None
 
-    def test_zero_tokens(self) -> None:
-        assert _openai_cost("gpt-4o", 0, 0) == pytest.approx(0.0)
+    def test_env_var_override_replaces_table(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("RECUT_PRICE_INPUT", "1.0")
+        monkeypatch.setenv("RECUT_PRICE_OUTPUT", "2.0")
+        # Even for an unknown model, env overrides kick in
+        cost = resolve_cost(ANTHROPIC_PRICING, "claude-unknown-99", 1_000_000, 1_000_000)
+        # 1M * 1.0 + 1M * 2.0 = 3.0
+        assert cost == pytest.approx(3.0)
+
+    def test_env_var_override_with_known_model(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("RECUT_PRICE_INPUT", "0.5")
+        monkeypatch.setenv("RECUT_PRICE_OUTPUT", "0.5")
+        # Discounted rate overrides the table value of $3/$15 for sonnet
+        cost = resolve_cost(ANTHROPIC_PRICING, "claude-sonnet-4-6", 1_000_000, 0)
+        assert cost == pytest.approx(0.5)
+
+    def test_env_var_invalid_value_falls_back_to_table(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("RECUT_PRICE_INPUT", "not-a-number")
+        monkeypatch.setenv("RECUT_PRICE_OUTPUT", "not-a-number")
+        cost = resolve_cost(ANTHROPIC_PRICING, "claude-sonnet-4-6", 1_000_000, 0)
+        assert cost == pytest.approx(3.0)  # falls back to table
+
+
+class TestFormatCost:
+    def test_usd_default_uses_dollar_sign(self) -> None:
+        assert format_cost(0.0042) == "$0.0042"
+
+    def test_custom_unit_appended(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("RECUT_COST_UNIT", "EUR")
+        assert format_cost(0.0042) == "0.0042 EUR"
+
+    def test_credits_unit(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("RECUT_COST_UNIT", "credits")
+        result = format_cost(1.5)
+        assert "1.5000" in result
+        assert "credits" in result
 
 
 class TestTracerCostAggregation:
@@ -322,13 +356,13 @@ class TestTracerCostAggregation:
         )
         ctx = RecutContext(trace=trace, provider=provider, flag_handlers=[])
 
-        step_a = RecutStep(index=0, type=StepType.OUTPUT, content="a", token_cost_usd=0.001)
-        step_b = RecutStep(index=1, type=StepType.OUTPUT, content="b", token_cost_usd=0.002)
+        step_a = RecutStep(index=0, type=StepType.OUTPUT, content="a", token_cost=0.001)
+        step_b = RecutStep(index=1, type=StepType.OUTPUT, content="b", token_cost=0.002)
         ctx.add_step(step_a)
         ctx.add_step(step_b)
 
         ctx.finalize()
-        assert trace.meta.token_cost_usd == pytest.approx(0.003, rel=1e-5)
+        assert trace.meta.token_cost == pytest.approx(0.003, rel=1e-5)
 
     def test_finalize_skips_cost_when_no_steps_have_cost(self) -> None:
         from recut.core.tracer import RecutContext
@@ -348,7 +382,7 @@ class TestTracerCostAggregation:
         ctx = RecutContext(trace=trace, provider=provider, flag_handlers=[])
         ctx.add_step(RecutStep(index=0, type=StepType.OUTPUT, content="a"))
         ctx.finalize()
-        assert trace.meta.token_cost_usd is None
+        assert trace.meta.token_cost is None
 
     def test_finalize_aggregates_token_counts(self) -> None:
         from recut.core.tracer import RecutContext
@@ -402,7 +436,7 @@ class TestAnthropicProviderCost:
         steps = [s async for s in provider.run_agent("test")]
         assert len(steps) == 1
         # 1000 * 3 / 1M + 500 * 15 / 1M = 0.003 + 0.0075 = 0.0105
-        assert steps[0].token_cost_usd == pytest.approx(0.0105, rel=1e-4)
+        assert steps[0].token_cost == pytest.approx(0.0105, rel=1e-4)
         assert steps[0].token_count == 1500
 
     @pytest.mark.asyncio
@@ -430,7 +464,7 @@ class TestAnthropicProviderCost:
         provider._client = mock_client
 
         steps = [s async for s in provider.run_agent("test")]
-        assert steps[0].token_cost_usd is None
+        assert steps[0].token_cost is None
 
 
 class TestOpenAIProviderCost:
@@ -464,5 +498,5 @@ class TestOpenAIProviderCost:
         steps = [s async for s in provider.run_agent("test")]
         assert len(steps) == 1
         # 1000 * 2.50 / 1M + 500 * 10.0 / 1M = 0.0025 + 0.005 = 0.0075
-        assert steps[0].token_cost_usd == pytest.approx(0.0075, rel=1e-4)
+        assert steps[0].token_cost == pytest.approx(0.0075, rel=1e-4)
         assert steps[0].token_count == 1500

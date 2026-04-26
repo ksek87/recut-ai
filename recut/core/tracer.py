@@ -57,11 +57,11 @@ class RecutContext:
         self.trace.meta.duration_seconds = round(elapsed, 3)
         # Aggregate token counts and cost from steps
         token_total = sum(s.token_count for s in self.trace.steps if s.token_count)
-        cost_total = sum(s.token_cost_usd for s in self.trace.steps if s.token_cost_usd)
+        cost_total = sum(s.token_cost for s in self.trace.steps if s.token_cost)
         if token_total:
             self.trace.meta.token_count = token_total
         if cost_total:
-            self.trace.meta.token_cost_usd = round(cost_total, 6)
+            self.trace.meta.token_cost = round(cost_total, 6)
         return self.trace
 
 

@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 import httpx
 import openai as _openai
 
+from recut.providers._pricing import OPENAI_PRICING, resolve_cost
 from recut.providers.base import AbstractProvider
 from recut.schema.trace import (
     ReasoningSource,
@@ -19,33 +20,6 @@ _INFERRED_REASONING_PROMPT = """You are analyzing an AI assistant's response.
 Reconstruct the likely reasoning the model used to arrive at this response.
 Be concise (2-4 sentences). Focus on decision logic, not the output itself.
 Output only the reconstructed reasoning, no preamble."""
-
-# Pricing per million tokens (input, output)
-_OPENAI_PRICING: dict[str, tuple[float, float]] = {
-    "gpt-4o": (2.50, 10.0),
-    "gpt-4o-mini": (0.15, 0.60),
-    "gpt-4-turbo": (10.0, 30.0),
-    "gpt-4": (30.0, 60.0),
-    "gpt-3.5-turbo": (0.50, 1.50),
-    "o1": (15.0, 60.0),
-    "o1-mini": (3.0, 12.0),
-    "o3-mini": (1.10, 4.40),
-}
-
-
-def _openai_cost(model: str, input_tokens: int, output_tokens: int) -> float | None:
-    pricing = _OPENAI_PRICING.get(model)
-    if pricing is None:
-        # Strip date suffix like "-2024-11-20" from "gpt-4o-2024-11-20"
-        parts = model.split("-")
-        for i, part in enumerate(parts):
-            if len(part) == 4 and part.isdigit():
-                pricing = _OPENAI_PRICING.get("-".join(parts[:i]))
-                break
-    if pricing is None:
-        return None
-    input_price, output_price = pricing
-    return (input_tokens * input_price + output_tokens * output_price) / 1_000_000
 
 
 class OpenAIProvider(AbstractProvider):
@@ -141,7 +115,9 @@ class OpenAIProvider(AbstractProvider):
         input_tokens = getattr(usage, "prompt_tokens", 0) if usage else 0
         output_tokens = getattr(usage, "completion_tokens", 0) if usage else 0
         total_tokens = input_tokens + output_tokens
-        cost = _openai_cost(self.model, input_tokens, output_tokens)
+        cost = resolve_cost(
+            OPENAI_PRICING, self.model, input_tokens, output_tokens, strip_date_suffix=True
+        )
 
         if choice.message.tool_calls:
             n_steps = max(len(choice.message.tool_calls), 1)
@@ -160,7 +136,7 @@ class OpenAIProvider(AbstractProvider):
                     content=json.dumps({"name": tc.function.name, "input": tc.function.arguments}),
                     reasoning=reasoning,
                     token_count=per_step_tokens,
-                    token_cost_usd=per_step_cost,
+                    token_cost=per_step_cost,
                 )
                 step_index += 1
         else:
@@ -172,7 +148,7 @@ class OpenAIProvider(AbstractProvider):
                 content=content,
                 reasoning=reasoning,
                 token_count=total_tokens,
-                token_cost_usd=cost,
+                token_cost=cost,
             )
 
     async def replay_from(
