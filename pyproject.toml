@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "recut-ai"
-version = "0.1.0"
+version = "0.3.0"
 description = "Intercept, replay, and audit your AI agent runs"
 readme = "README.md"
 license = { text = "MIT" }
@@ -18,8 +18,10 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Framework :: AsyncIO",
     "Topic :: Software Development :: Debuggers",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
 ]
 dependencies = [
     "pydantic>=2.0",

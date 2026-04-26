@@ -8,6 +8,9 @@ import os
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
+import anthropic
+import openai
+
 from recut.flagging.flags import (
     CONFIDENCE_PHRASES,
     UNCERTAINTY_PHRASES,
@@ -427,21 +430,69 @@ async def _layer2_embeddings_batch(
 
 
 # ---------------------------------------------------------------------------
-# Module-level meta-LLM client (reused across calls)
+# Layer 4 — BYOM backend dispatcher
+# Set RECUT_L4_BACKEND=local (default) | anthropic | openai
 # ---------------------------------------------------------------------------
 
-_meta_client: Any = None
+_L4_VALID_BACKENDS = frozenset({"local", "anthropic", "openai"})
+
+# One singleton client per backend (keyed by backend name)
+_l4_clients: dict[str, Any] = {}
+
+_DEFAULT_MODELS = {
+    "anthropic": "claude-haiku-4-5-20251001",
+    "openai": "gpt-4o-mini",
+    "local": "llama3",
+}
 
 
-def _get_meta_client() -> Any:
-    global _meta_client
-    if _meta_client is None:
-        import anthropic
+def _get_l4_client(backend: str) -> Any:
+    if backend not in _l4_clients:
         import httpx
 
         timeout = httpx.Timeout(float(os.environ.get("RECUT_API_TIMEOUT", "30")))
-        _meta_client = anthropic.AsyncAnthropic(timeout=timeout)
-    return _meta_client
+        if backend == "anthropic":
+            _l4_clients[backend] = anthropic.AsyncAnthropic(timeout=timeout)
+        else:
+            base_url = (
+                os.environ.get("RECUT_L4_LOCAL_URL", "http://localhost:11434/v1")
+                if backend == "local"
+                else None
+            )
+            api_key = "local" if backend == "local" else os.environ.get("OPENAI_API_KEY", "no-key")
+            kwargs: dict[str, Any] = {"api_key": api_key, "timeout": timeout}
+            if base_url:
+                kwargs["base_url"] = base_url
+            _l4_clients[backend] = openai.AsyncOpenAI(**kwargs)
+    return _l4_clients[backend]
+
+
+async def _call_l4_api(backend: str, system: str, user_prompt: str, meta_model: str) -> str:
+    """Dispatch to the configured L4 backend. Returns raw text or raises."""
+    client = _get_l4_client(backend)
+    if backend == "anthropic":
+        response = await client.messages.create(
+            model=meta_model,
+            max_tokens=2000,
+            system=system,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        if not response.content:
+            return ""
+        block = response.content[0]
+        return block.text.strip() if hasattr(block, "text") else ""
+    else:
+        response = await client.chat.completions.create(
+            model=meta_model,
+            max_tokens=2000,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_prompt},
+            ],
+        )
+        if not response.choices:
+            return ""
+        return (response.choices[0].message.content or "").strip()
 
 
 # ---------------------------------------------------------------------------
@@ -453,10 +504,13 @@ async def _layer4_llm_judge(
     steps: list[RecutStep],
     original_prompt: str,
 ) -> list[RecutFlag]:
-    """Call a cheap meta-LLM to judge multiple steps in one batched request."""
-    import anthropic
+    """Call the configured meta-LLM to judge multiple steps in one batched request."""
+    backend = os.environ.get("RECUT_L4_BACKEND", "local").lower()
+    if backend not in _L4_VALID_BACKENDS:
+        _log.warning("recut: Unknown RECUT_L4_BACKEND=%r, defaulting to local", backend)
+        backend = "local"
 
-    meta_model = os.environ.get("RECUT_META_MODEL", "claude-haiku-4-5-20251001")
+    meta_model = os.environ.get("RECUT_META_MODEL", _DEFAULT_MODELS[backend])
 
     steps_payload = json.dumps(
         [
@@ -480,27 +534,21 @@ async def _layer4_llm_judge(
     raw = ""
     for attempt in range(3):
         try:
-            response = await _get_meta_client().messages.create(
-                model=meta_model,
-                max_tokens=2000,
-                system=FLAGGING_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            if not response.content:
-                return []
-            block = response.content[0]
-            raw = block.text.strip() if hasattr(block, "text") else ""
+            raw = await _call_l4_api(backend, FLAGGING_SYSTEM_PROMPT, prompt, meta_model)
             return _parse_llm_flags(raw, steps)
-        except anthropic.AuthenticationError as exc:
-            _log.warning("recut: Layer 4 auth error — check RECUT_META_MODEL key: %s", exc)
+        except (anthropic.AuthenticationError, openai.AuthenticationError) as exc:
+            _log.warning("recut: Layer 4 auth error (backend=%r): %s", backend, exc)
             return []
-        except anthropic.RateLimitError:
+        except (anthropic.RateLimitError, openai.RateLimitError):
             if attempt < 2:
                 await asyncio.sleep(5 * (attempt + 1))
             else:
                 _log.warning("recut: Layer 4 rate-limited after 3 attempts, skipping")
                 return []
-        except anthropic.APIConnectionError:
+        except (anthropic.APIConnectionError, openai.APIConnectionError):
+            if backend == "local":
+                _log.debug("recut: L4 local backend unreachable, skipping")
+                return []
             if attempt < 2:
                 await asyncio.sleep(2**attempt)
             else:
