@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+import logging
+from collections.abc import AsyncIterator, Coroutine
+from typing import Any
 
 from recut.flagging.engine import FlaggingEngine
 from recut.plain.summariser import flag_suggested_action, summarise_step
 from recut.schema.hooks import FlagHandler, RecutFlagEvent
 from recut.schema.trace import RecutFlag, RecutStep, RecutTrace, TraceMode
+
+_log = logging.getLogger(__name__)
 
 
 class InterceptSession:
@@ -49,13 +53,16 @@ class InterceptSession:
                 preceding_steps=list(preceding),
                 agent_id=self.trace.agent_id,
             )
+            coros: list[Coroutine[Any, Any, Any]] = []
             for handler in self._flag_handlers:
                 try:
                     result = handler(event)
                     if asyncio.iscoroutine(result):
-                        await result
-                except Exception:
-                    pass
+                        coros.append(result)
+                except Exception as exc:
+                    _log.warning("recut: flag handler raised synchronously: %s", exc)
+            if coros:
+                await asyncio.gather(*coros, return_exceptions=True)
 
             if self._should_pause(flag):
                 self._paused.clear()

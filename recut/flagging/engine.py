@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from recut.flagging.flags import (
@@ -22,6 +23,26 @@ from recut.schema.trace import (
     StepType,
     TraceMode,
 )
+
+_log = logging.getLogger(__name__)
+
+# Module-level lazy singleton for the meta-LLM client
+_meta_client: Any = None
+
+
+def _get_meta_client() -> Any:
+    global _meta_client
+    if _meta_client is None:
+        import anthropic
+        import httpx
+
+        timeout = httpx.Timeout(float(os.environ.get("RECUT_API_TIMEOUT", "30")))
+        _meta_client = anthropic.AsyncAnthropic(timeout=timeout)
+    return _meta_client
+
+
+# In-memory L1 flag cache (content_hash → (flags, expires_at))
+_mem_cache: dict[str, tuple[list[RecutFlag], datetime]] = {}
 
 
 class FlaggingEngine:
@@ -331,11 +352,69 @@ def _get_embedding_model() -> Any:
 # ---------------------------------------------------------------------------
 
 
+def _parse_llm_flags(raw: str, steps: list[RecutStep]) -> list[RecutFlag]:
+    """Parse the LLM judge response into RecutFlag objects."""
+    thresholds = Thresholds()
+    flags: list[RecutFlag] = []
+
+    results = json.loads(raw)  # raises json.JSONDecodeError on bad input
+
+    if not isinstance(results, list):
+        _log.warning("recut: Layer 4 response is not a JSON array")
+        return []
+
+    step_map = {s.id: s for s in steps}
+
+    for result in results:
+        step_id = result.get("step_id", "")
+        plain_reasons = result.get("plain_reasons", {})
+
+        for flag_name, score in result.items():
+            if flag_name in ("step_id", "plain_reasons"):
+                continue
+            if not isinstance(score, (int, float)):
+                continue
+            if score < thresholds.LOW:
+                continue
+
+            try:
+                flag_type = FlagType(flag_name)
+            except ValueError:
+                continue
+
+            # Use step from map if available, else keep raw step_id
+            resolved_id = step_id if step_id in step_map else step_id
+
+            severity = (
+                Severity.HIGH
+                if score >= thresholds.HIGH
+                else Severity.MEDIUM
+                if score >= thresholds.MEDIUM
+                else Severity.LOW
+            )
+
+            flags.append(
+                RecutFlag(
+                    type=flag_type,
+                    severity=severity,
+                    plain_reason=plain_reasons.get(
+                        flag_name, f"Flagged by meta-LLM with score {score:.2f}."
+                    ),
+                    step_id=resolved_id,
+                    source=FlagSource.LLM,
+                )
+            )
+
+    return flags
+
+
 async def _layer4_llm_judge(
     steps: list[RecutStep],
     original_prompt: str,
 ) -> list[RecutFlag]:
     """Call a cheap meta-LLM to judge multiple steps in one batched request."""
+    import asyncio
+
     import anthropic
 
     meta_model = os.environ.get("RECUT_META_MODEL", "claude-haiku-4-5-20251001")
@@ -359,60 +438,40 @@ async def _layer4_llm_judge(
         steps_json=steps_payload,
     )
 
-    try:
-        client = anthropic.AsyncAnthropic()
-        response = await client.messages.create(
-            model=meta_model,
-            max_tokens=2000,
-            system=FLAGGING_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw = response.content[0].text.strip()  # type: ignore[union-attr]
-        results = json.loads(raw)
-    except Exception:
-        return []
-
-    flags: list[RecutFlag] = []
-    thresholds = Thresholds()
-
-    for result in results:
-        step_id = result.get("step_id", "")
-        plain_reasons = result.get("plain_reasons", {})
-
-        for flag_name, score in result.items():
-            if flag_name in ("step_id", "plain_reasons"):
-                continue
-            if not isinstance(score, (int, float)):
-                continue
-            if score < thresholds.LOW:
-                continue
-
-            try:
-                flag_type = FlagType(flag_name)
-            except ValueError:
-                continue
-
-            severity = (
-                Severity.HIGH
-                if score >= thresholds.HIGH
-                else Severity.MEDIUM
-                if score >= thresholds.MEDIUM
-                else Severity.LOW
+    raw = ""
+    for attempt in range(3):
+        try:
+            response = await _get_meta_client().messages.create(
+                model=meta_model,
+                max_tokens=2000,
+                system=FLAGGING_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": prompt}],
             )
+            if not response.content:
+                return []
+            block = response.content[0]
+            raw = block.text.strip() if hasattr(block, "text") else ""
+            return _parse_llm_flags(raw, steps)
+        except anthropic.RateLimitError:
+            if attempt < 2:
+                await asyncio.sleep(5 * (attempt + 1))
+            else:
+                _log.warning("recut: Layer 4 rate-limited after 3 attempts, skipping")
+                return []
+        except anthropic.APIConnectionError:
+            if attempt < 2:
+                await asyncio.sleep(2**attempt)
+            else:
+                _log.warning("recut: Layer 4 connection error after 3 attempts, skipping")
+                return []
+        except json.JSONDecodeError as exc:
+            _log.warning("recut: Layer 4 returned non-JSON: %.80s…", raw, exc_info=exc)
+            return []
+        except Exception as exc:
+            _log.warning("recut: Layer 4 unexpected error: %s", exc)
+            return []
 
-            flags.append(
-                RecutFlag(
-                    type=flag_type,
-                    severity=severity,
-                    plain_reason=plain_reasons.get(
-                        flag_name, f"Flagged by meta-LLM with score {score:.2f}."
-                    ),
-                    step_id=step_id,
-                    source=FlagSource.LLM,
-                )
-            )
-
-    return flags
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -428,13 +487,19 @@ def _cache_key(step: RecutStep, preceding: list[RecutStep]) -> str:
 async def _get_cached_flags(content_hash: str) -> list[RecutFlag] | None:
     if os.environ.get("RECUT_CACHE_ENABLED", "true").lower() != "true":
         return None
+
+    # L1: in-memory cache
+    entry = _mem_cache.get(content_hash)
+    if entry is not None and datetime.now(UTC) < entry[1]:
+        return entry[0]
+
     try:
         import asyncio
 
         from recut.storage.db import StorageClient
 
         client = StorageClient()
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         row = await loop.run_in_executor(None, client.get_cached_flags, content_hash)
         if row is None:
             return None
@@ -447,14 +512,18 @@ async def _get_cached_flags(content_hash: str) -> list[RecutFlag] | None:
 async def _cache_flags(content_hash: str, flags: list[RecutFlag]) -> None:
     if os.environ.get("RECUT_CACHE_ENABLED", "true").lower() != "true":
         return
+
+    # Populate in-memory cache
+    ttl = int(os.environ.get("RECUT_CACHE_TTL", "3600"))
+    _mem_cache[content_hash] = (flags, datetime.now(UTC) + timedelta(seconds=ttl))
+
     try:
         import asyncio
 
         from recut.storage.db import StorageClient
         from recut.storage.models import FlagCache
 
-        ttl = int(os.environ.get("RECUT_CACHE_TTL", "3600"))
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         row = FlagCache(
             content_hash=content_hash,
             flags_json=json.dumps([f.model_dump(mode="json") for f in flags]),
@@ -462,7 +531,7 @@ async def _cache_flags(content_hash: str, flags: list[RecutFlag]) -> None:
             expires_at=now + timedelta(seconds=ttl),
         )
         client = StorageClient()
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, client.save_flag_cache, row)
     except Exception:
         pass

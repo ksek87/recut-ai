@@ -28,11 +28,9 @@ async def audit(trace: RecutTrace) -> AuditRecord:
 
 async def _score_trace_steps(trace: RecutTrace, engine: FlaggingEngine) -> None:
     """Score all steps in the trace using the given engine, mutating in-place."""
-
-    for i, step in enumerate(trace.steps):
-        preceding = trace.steps[max(0, i - 2) : i]
-        flags = await engine.score_step(step, preceding, trace.prompt)
-
+    results = await engine.score_batch(trace.steps, trace.prompt)
+    for step in trace.steps:
+        flags = results.get(step.id, [])
         step.flags = flags
         step.risk_score = _compute_risk_score(flags)
         step.plain_summary = summarise_step(step, trace.language)
