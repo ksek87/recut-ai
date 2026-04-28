@@ -124,8 +124,9 @@ class TestTraceIfExceptionHandling:
         async def my_agent(prompt: str, **kwargs) -> str:
             return "done"
 
-        with caplog.at_level(logging.WARNING, logger="recut.core.tracer"), patch(
-            "recut.core.tracer._persist_trace", new=AsyncMock()
+        with (
+            caplog.at_level(logging.WARNING, logger="recut.core.tracer"),
+            patch("recut.core.tracer._persist_trace", new=AsyncMock()),
         ):
             await my_agent("test")
 
@@ -179,9 +180,10 @@ class TestSampleRateEnvVar:
         async def my_agent(prompt: str, **kwargs) -> str:
             return "ok"
 
-        with patch.dict(os.environ, {"RECUT_DEFAULT_SAMPLE_RATE": "0.0"}), patch(
-            "recut.core.tracer._persist_trace", new=AsyncMock()
-        ) as mock_persist:
+        with (
+            patch.dict(os.environ, {"RECUT_DEFAULT_SAMPLE_RATE": "0.0"}),
+            patch("recut.core.tracer._persist_trace", new=AsyncMock()) as mock_persist,
+        ):
             await my_agent("hi")
 
         mock_persist.assert_not_called()
@@ -199,8 +201,9 @@ class TestEmbeddingThresholdEnvVar:
 
         # Without sentence_transformers installed, this returns [] immediately.
         # But we can verify the env-var path is wrapped by checking no ValueError.
-        with caplog.at_level(logging.WARNING, logger="recut.flagging.engine"), patch.dict(
-            os.environ, {"RECUT_EMBEDDING_THRESHOLD": "bad-value"}
+        with (
+            caplog.at_level(logging.WARNING, logger="recut.flagging.engine"),
+            patch.dict(os.environ, {"RECUT_EMBEDDING_THRESHOLD": "bad-value"}),
         ):
             step = RecutStep(index=0, type=StepType.OUTPUT, content="hello")
             try:
@@ -239,9 +242,10 @@ class TestCacheTTLEnvVar:
         from recut.flagging.engine import _cache_flags, _mem_cache
 
         _mem_cache.clear()
-        with patch.dict(os.environ, {"RECUT_CACHE_TTL": "0"}), patch(
-            "recut.storage.db.StorageClient"
-        ) as mock_client:
+        with (
+            patch.dict(os.environ, {"RECUT_CACHE_TTL": "0"}),
+            patch("recut.storage.db.StorageClient") as mock_client,
+        ):
             mock_client.return_value.cache_flags = MagicMock()
             await _cache_flags("hash_zero_ttl", [])
 
@@ -369,9 +373,10 @@ class TestReplayCmdBoundsCheck:
         mock_client = MagicMock()
         mock_client.load_trace.return_value = trace_obj
 
-        with patch("recut.storage.db.StorageClient", return_value=mock_client), pytest.raises(
-            click.exceptions.Exit
-        ) as exc_info:
+        with (
+            patch("recut.storage.db.StorageClient", return_value=mock_client),
+            pytest.raises(click.exceptions.Exit) as exc_info,
+        ):
             await _replay_async("trace-id-123", 99, '{"injected_content": "x"}')
 
         assert exc_info.value.exit_code == 1
@@ -395,9 +400,10 @@ class TestReplayCmdBoundsCheck:
         mock_client = MagicMock()
         mock_client.load_trace.return_value = trace_obj
 
-        with patch("recut.storage.db.StorageClient", return_value=mock_client), pytest.raises(
-            click.exceptions.Exit
-        ) as exc_info:
+        with (
+            patch("recut.storage.db.StorageClient", return_value=mock_client),
+            pytest.raises(click.exceptions.Exit) as exc_info,
+        ):
             await _replay_async("trace-id-123", -1, '{"injected_content": "x"}')
 
         assert exc_info.value.exit_code == 1
@@ -418,9 +424,10 @@ class TestCLIInvalidTraceID:
         mock_client = MagicMock()
         mock_client.load_trace.return_value = None
 
-        with patch("recut.storage.db.StorageClient", return_value=mock_client), pytest.raises(
-            click.exceptions.Exit
-        ) as exc_info:
+        with (
+            patch("recut.storage.db.StorageClient", return_value=mock_client),
+            pytest.raises(click.exceptions.Exit) as exc_info,
+        ):
             await _peek_async("nonexistent-trace-id")
 
         assert exc_info.value.exit_code == 1
@@ -434,9 +441,10 @@ class TestCLIInvalidTraceID:
         mock_client = MagicMock()
         mock_client.load_trace.return_value = None
 
-        with patch("recut.storage.db.StorageClient", return_value=mock_client), pytest.raises(
-            click.exceptions.Exit
-        ) as exc_info:
+        with (
+            patch("recut.storage.db.StorageClient", return_value=mock_client),
+            pytest.raises(click.exceptions.Exit) as exc_info,
+        ):
             await _audit_async("nonexistent-trace-id")
 
         assert exc_info.value.exit_code == 1
@@ -450,9 +458,10 @@ class TestCLIInvalidTraceID:
         mock_client = MagicMock()
         mock_client.load_trace.return_value = None
 
-        with patch("recut.storage.db.StorageClient", return_value=mock_client), pytest.raises(
-            click.exceptions.Exit
-        ) as exc_info:
+        with (
+            patch("recut.storage.db.StorageClient", return_value=mock_client),
+            pytest.raises(click.exceptions.Exit) as exc_info,
+        ):
             await _replay_async("bad-id", 0, '{"injected_content": "x"}')
 
         assert exc_info.value.exit_code == 1
@@ -476,9 +485,10 @@ class TestCLIInvalidTraceID:
         mock_client = MagicMock()
         mock_client.load_trace.return_value = trace_obj
 
-        with patch("recut.storage.db.StorageClient", return_value=mock_client), pytest.raises(
-            click.exceptions.Exit
-        ) as exc_info:
+        with (
+            patch("recut.storage.db.StorageClient", return_value=mock_client),
+            pytest.raises(click.exceptions.Exit) as exc_info,
+        ):
             await _replay_async("trace-id", 0, "not-valid-json")
 
         assert exc_info.value.exit_code == 1
@@ -647,14 +657,15 @@ class TestStressVariantExceptions:
             return make_fork(fork_step_index)
 
         score_mock = AsyncMock(return_value={})
-        with patch("recut.core.stress.replay", side_effect=mock_replay), patch(
-            "recut.flagging.engine.FlaggingEngine.score_batch", score_mock
+        with (
+            patch("recut.core.stress.replay", side_effect=mock_replay),
+            patch("recut.flagging.engine.FlaggingEngine.score_batch", score_mock),
         ):
             runs = await stress(
-                    trace=trace_obj,
-                    provider=_StubProvider(),
-                    num_variants=3,
-                )
+                trace=trace_obj,
+                provider=_StubProvider(),
+                num_variants=3,
+            )
 
         # The list should contain only successful variants (None entries filtered out)
         assert isinstance(runs, list)
