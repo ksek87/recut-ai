@@ -287,7 +287,11 @@ async def _layer2_embeddings(
     except ImportError:
         return []
 
-    threshold = float(os.environ.get("RECUT_EMBEDDING_THRESHOLD", "0.75"))
+    try:
+        threshold = float(os.environ.get("RECUT_EMBEDDING_THRESHOLD", "0.75"))
+    except (ValueError, TypeError):
+        _log.warning("recut: invalid RECUT_EMBEDDING_THRESHOLD; using 0.75")
+        threshold = 0.75
 
     try:
         model = _get_embedding_model()
@@ -369,7 +373,11 @@ async def _layer2_embeddings_batch(
     if not steps:
         return {}
 
-    threshold = float(os.environ.get("RECUT_EMBEDDING_THRESHOLD", "0.75"))
+    try:
+        threshold = float(os.environ.get("RECUT_EMBEDDING_THRESHOLD", "0.75"))
+    except (ValueError, TypeError):
+        _log.warning("recut: invalid RECUT_EMBEDDING_THRESHOLD; using 0.75")
+        threshold = 0.75
 
     try:
         model = _get_embedding_model()
@@ -450,7 +458,12 @@ def _get_l4_client(backend: str) -> Any:
     if backend not in _l4_clients:
         import httpx
 
-        timeout = httpx.Timeout(float(os.environ.get("RECUT_API_TIMEOUT", "30")))
+        try:
+            _timeout_secs = float(os.environ.get("RECUT_API_TIMEOUT", "30"))
+        except (ValueError, TypeError):
+            _log.warning("recut: invalid RECUT_API_TIMEOUT; using 30s")
+            _timeout_secs = 30.0
+        timeout = httpx.Timeout(_timeout_secs)
         if backend == "anthropic":
             _l4_clients[backend] = anthropic.AsyncAnthropic(timeout=timeout)
         else:
@@ -676,7 +689,11 @@ async def _cache_flags(content_hash: str, flags: list[RecutFlag]) -> None:
     if os.environ.get("RECUT_CACHE_ENABLED", "true").lower() != "true":
         return
 
-    ttl = int(os.environ.get("RECUT_CACHE_TTL", "3600"))
+    try:
+        ttl = max(1, int(os.environ.get("RECUT_CACHE_TTL", "3600")))
+    except (ValueError, TypeError):
+        _log.warning("recut: invalid RECUT_CACHE_TTL; using 3600s")
+        ttl = 3600
     expires_at = datetime.now(UTC) + timedelta(seconds=ttl)
 
     # Populate L1 cache immediately (no I/O)
