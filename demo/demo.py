@@ -27,8 +27,9 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+import recut
 from recut.export.exporter import export
-from recut.flagging.engine import FlaggingEngine
+from recut.schema.audit import AuditRecord
 from recut.schema.trace import (
     ReasoningSource,
     RecutStep,
@@ -49,6 +50,27 @@ DEMO_PROMPT = (
     "Compare it to competitors in the AI chip space. "
     "Provide a structured Buy / Hold / Sell recommendation with reasoning."
 )
+
+# ---------------------------------------------------------------------------
+# Global flag handler — demonstrates @recut.on_flag
+# Registered once at import time; fires in peek, audit, and intercept modes.
+# ---------------------------------------------------------------------------
+
+
+@recut.on_flag(severity="high")
+def _on_high_flag(event: recut.RecutFlagEvent) -> None:
+    """Print a real-time alert whenever a HIGH-severity flag fires."""
+    source_label = {
+        "rule": "[dim][rule][/dim]",
+        "embedding": "[dim][embedding][/dim]",
+        "native": "[bold yellow][native][/bold yellow]",
+        "llm": "[cyan][judge][/cyan]",
+    }.get(event.flag.source.value, event.flag.source.value)
+    console.print(
+        f"  [bold red]⚡ HIGH[/bold red] {event.flag.type.value} "
+        f"{source_label}  [dim]{event.flag.plain_reason[:80]}[/dim]"
+    )
+
 
 # ---------------------------------------------------------------------------
 # Tool definitions
@@ -187,7 +209,6 @@ _CANNED_STOCK: dict[str, str] = {
     "AMD|pe_ratio": "AMD trailing P/E: 280x. Forward P/E: 28x.",
 }
 
-# keyword (must appear in query) → canned result
 _CANNED_WEB: dict[str, str] = {
     "risk": "• China export controls restrict H100/H200 sales.\n• AMD MI300X gaining enterprise adoption.\n• Customer concentration: Microsoft/Google/Meta = ~40% of revenue.",
     "competitor": "• AMD MI300X closing the gap in memory bandwidth for LLM inference.\n• Intel Gaudi 3 targeting enterprise at lower price points.\n• Custom silicon (Google TPU, AWS Trainium) reducing hyperscaler GPU spend.",
@@ -314,6 +335,14 @@ def _fmt_inputs(inputs: dict) -> str:
 # Helpers
 # ---------------------------------------------------------------------------
 
+# Source label rendering matches the recut CLI output style
+_SOURCE_LABEL: dict[str, str] = {
+    "rule": "[dim][rule][/dim]",
+    "embedding": "[dim][embedding][/dim]",
+    "native": "[bold yellow][native][/bold yellow]",
+    "llm": "[cyan][judge][/cyan]",
+}
+
 
 def _build_trace(steps: list[RecutStep], model: str, prompt: str) -> RecutTrace:
     provider = "AnthropicProvider" if model != "mock-provider-v1" else "MockProvider"
@@ -337,18 +366,19 @@ def _print_flags(flags_by_step: dict[str, list], steps: list[RecutStep]) -> None
     table.add_column("#", style="dim", width=4)
     table.add_column("Severity", width=8)
     table.add_column("Type", width=30)
-    table.add_column("Source", width=10)
+    table.add_column("Layer", width=12)
     table.add_column("Reason")
     for step_id, flags in flags_by_step.items():
         for flag in flags:
             colour = {"high": "red", "medium": "yellow", "low": "green"}.get(
                 flag.severity.value, "white"
             )
+            source_label = _SOURCE_LABEL.get(flag.source.value, flag.source.value)
             table.add_row(
                 str(idx_map.get(step_id, "?")),
                 f"[{colour}]{flag.severity.value.upper()}[/{colour}]",
                 flag.type.value,
-                flag.source.value,
+                source_label,
                 flag.plain_reason[:90],
             )
     console.print(table)
@@ -385,16 +415,39 @@ async def phase1_run(use_real: bool) -> tuple[list[RecutStep], RecutTrace]:
     return steps, trace
 
 
-async def phase2_flag(steps: list[RecutStep]) -> dict[str, list]:
-    _print_phase(2, "Flag Scoring (peek)")
-    engine = FlaggingEngine(mode=TraceMode.PEEK, use_embeddings=False, use_llm_judge=False)
-    flags_by_step = await engine.score_batch(steps, DEMO_PROMPT)
+async def phase2_peek(trace: RecutTrace) -> dict[str, list]:
+    """Score all steps via recut.peek() — uses flagging_depth='fast' (layers 1-3, zero LLM cost).
 
+    HIGH flags fire the @recut.on_flag handler registered at module level in real time.
+    To enable the Layer 4 LLM judge: recut.peek(trace, flagging_depth="full").
+    Layer 4 defaults to a local model (RECUT_L4_BACKEND=local); set RECUT_L4_BACKEND=anthropic
+    to use the Anthropic API instead.
+    """
+    _print_phase(2, "Flag Scoring — recut.peek(flagging_depth='fast')")
+    console.print(
+        "[dim]Layers 1-3: rules + native thinking analysis. "
+        "HIGH flags fire @recut.on_flag handler.[/dim]"
+    )
+
+    audit_record: AuditRecord = await recut.peek(trace, flagging_depth="fast")
+
+    flags_by_step = {s.id: s.flags for s in trace.steps if s.flags}
     total = sum(len(v) for v in flags_by_step.values())
     high = sum(1 for fl in flags_by_step.values() for f in fl if f.severity == Severity.HIGH)
-    console.print(f"[green]Flags:[/green] {total} total, [red]{high} HIGH[/red]")
+
+    cost_str = ""
+    if trace.meta.token_cost is not None:
+        unit = os.environ.get("RECUT_COST_UNIT", "USD")
+        cost_str = f"  |  [dim]cost: {trace.meta.token_cost:.4f} {unit}[/dim]"
+
+    console.print(
+        f"[green]Flags:[/green] {total} total, [red]{high} HIGH[/red]"
+        f"  |  risk: {audit_record.highest_severity or 'none'}"
+        f"{cost_str}"
+    )
+
     if total:
-        _print_flags(flags_by_step, steps)
+        _print_flags(flags_by_step, trace.steps)
     else:
         console.print("  [dim]No flags raised.[/dim]")
     return flags_by_step
@@ -448,20 +501,26 @@ async def main() -> None:
     load_dotenv()
     use_real = bool(os.environ.get("ANTHROPIC_API_KEY"))
 
+    l4_backend = os.environ.get("RECUT_L4_BACKEND", "local")
+    l4_note = f"Layer 4 judge: [dim]{l4_backend}[/dim]" + (
+        " (skipped in fast mode)" if l4_backend == "local" else ""
+    )
+
     console.print(
         Panel(
-            "[bold]recut-ai SDK Demo[/bold] — Multi-step Research Agent\n\n"
+            f"[bold]recut-ai {recut.__version__} SDK Demo[/bold] — Multi-step Research Agent\n\n"
             + (
                 "Connected: real Claude API + live yfinance & DuckDuckGo data."
                 if use_real
                 else "[yellow]Offline: set ANTHROPIC_API_KEY for a live run.[/yellow]"
-            ),
+            )
+            + f"\n[dim]{l4_note}[/dim]",
             border_style="cyan",
         )
     )
 
     steps, trace = await phase1_run(use_real)
-    flags_by_step = await phase2_flag(steps)
+    flags_by_step = await phase2_peek(trace)
     phase3_export(trace)
     phase4_otel(trace, steps, flags_by_step)
 
