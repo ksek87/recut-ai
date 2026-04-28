@@ -12,10 +12,10 @@ app = typer.Typer(help="Quick triage of a recorded trace.")
 console = Console()
 
 _SOURCE_LABEL: dict[FlagSource, str] = {
-    FlagSource.RULE: "[dim][rule][/dim]",
-    FlagSource.EMBEDDING: "[dim][embedding][/dim]",
-    FlagSource.NATIVE: "[bold][native][/bold]",
-    FlagSource.LLM: "[cyan][judge][/cyan]",
+    FlagSource.RULE: "[dim]\\[rule][/dim]",
+    FlagSource.EMBEDDING: "[dim]\\[embedding][/dim]",
+    FlagSource.NATIVE: "[bold]\\[native][/bold]",
+    FlagSource.LLM: "[cyan]\\[judge][/cyan]",
 }
 
 

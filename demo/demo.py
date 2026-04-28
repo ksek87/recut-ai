@@ -61,10 +61,10 @@ DEMO_PROMPT = (
 def _on_high_flag(event: recut.RecutFlagEvent) -> None:
     """Print a real-time alert whenever a HIGH-severity flag fires."""
     source_label = {
-        "rule": "[dim][rule][/dim]",
-        "embedding": "[dim][embedding][/dim]",
-        "native": "[bold yellow][native][/bold yellow]",
-        "llm": "[cyan][judge][/cyan]",
+        "rule": "[dim]\\[rule][/dim]",
+        "embedding": "[dim]\\[embedding][/dim]",
+        "native": "[bold yellow]\\[native][/bold yellow]",
+        "llm": "[cyan]\\[judge][/cyan]",
     }.get(event.flag.source.value, event.flag.source.value)
     console.print(
         f"  [bold red]⚡ HIGH[/bold red] {event.flag.type.value} "
@@ -337,10 +337,10 @@ def _fmt_inputs(inputs: dict) -> str:
 
 # Source label rendering matches the recut CLI output style
 _SOURCE_LABEL: dict[str, str] = {
-    "rule": "[dim][rule][/dim]",
-    "embedding": "[dim][embedding][/dim]",
-    "native": "[bold yellow][native][/bold yellow]",
-    "llm": "[cyan][judge][/cyan]",
+    "rule": "[dim]\\[rule][/dim]",
+    "embedding": "[dim]\\[embedding][/dim]",
+    "native": "[bold yellow]\\[native][/bold yellow]",
+    "llm": "[cyan]\\[judge][/cyan]",
 }
 
 

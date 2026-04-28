@@ -9,10 +9,10 @@ from recut.schema.trace import FlagSource, RecutTrace, Severity
 _SEVERITY_ORDER = {"low": 0, "medium": 1, "high": 2}
 
 _SOURCE_LABEL: dict[FlagSource, str] = {
-    FlagSource.RULE: "[rule]",
-    FlagSource.EMBEDDING: "[embedding]",
-    FlagSource.NATIVE: "[native]",
-    FlagSource.LLM: "[judge]",
+    FlagSource.RULE: "\\[rule]",
+    FlagSource.EMBEDDING: "\\[embedding]",
+    FlagSource.NATIVE: "\\[native]",
+    FlagSource.LLM: "\\[judge]",
 }
 
 
