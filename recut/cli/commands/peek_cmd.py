@@ -6,8 +6,17 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from recut.schema.trace import FlagSource, Severity
+
 app = typer.Typer(help="Quick triage of a recorded trace.")
 console = Console()
+
+_SOURCE_LABEL: dict[FlagSource, str] = {
+    FlagSource.RULE: "[dim][rule][/dim]",
+    FlagSource.EMBEDDING: "[dim][embedding][/dim]",
+    FlagSource.NATIVE: "[bold][native][/bold]",
+    FlagSource.LLM: "[cyan][judge][/cyan]",
+}
 
 
 @app.callback(invoke_without_command=True)
@@ -20,30 +29,15 @@ def peek_cmd(
 
 
 async def _peek_async(trace_id: str, *, tui: bool = False) -> None:
-    import json
-
     from recut.cli.tui.peek_view import PeekView
     from recut.core.auditor import peek
-    from recut.schema.trace import RecutStep, RecutTrace, TraceLanguage, TraceMeta, TraceMode
     from recut.storage.db import StorageClient
 
     client = StorageClient()
-    row = client.get_trace_row(trace_id)
-    if not row:
+    trace = client.load_trace(trace_id)
+    if not trace:
         console.print(f"[red]Trace not found:[/red] {trace_id}")
         raise typer.Exit(1)
-
-    steps = [RecutStep(**s) for s in json.loads(row.steps_json)]
-    trace = RecutTrace(
-        id=row.id,
-        created_at=row.created_at,
-        agent_id=row.agent_id,
-        prompt=row.prompt,
-        mode=TraceMode(row.mode),
-        language=TraceLanguage(row.language),
-        meta=TraceMeta(model=row.model, provider=row.provider, total_steps=len(steps)),
-        steps=steps,
-    )
 
     record = await peek(trace)
 
@@ -62,19 +56,35 @@ async def _peek_async(trace_id: str, *, tui: bool = False) -> None:
     table.add_column("Step", style="dim")
     table.add_column("Type")
     table.add_column("Flag")
+    table.add_column("Source")
     table.add_column("Severity")
     table.add_column("Reason")
 
     for step in flagged:
         for flag in step.flags:
+            severity_cell = (
+                f"[red]{flag.severity}[/red]"
+                if flag.severity == Severity.HIGH
+                else f"[yellow]{flag.severity}[/yellow]"
+                if flag.severity == Severity.MEDIUM
+                else str(flag.severity)
+            )
+            reason = flag.plain_reason[:80]
+            if flag.confidence is not None:
+                reason += f" ({flag.confidence:.0%})"
             table.add_row(
                 str(step.index),
                 str(step.type),
                 str(flag.type),
-                f"[red]{flag.severity}[/red]"
-                if flag.severity == "high"
-                else f"[yellow]{flag.severity}[/yellow]",
-                flag.plain_reason[:80],
+                _SOURCE_LABEL.get(flag.source, str(flag.source)),
+                severity_cell,
+                reason,
             )
 
     console.print(table)
+
+    total_cost = sum(s.token_cost for s in trace.steps if s.token_cost)
+    if total_cost:
+        from recut.providers._pricing import format_cost
+
+        console.print(f"[dim]Token cost: {format_cost(total_cost)}[/dim]")

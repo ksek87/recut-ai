@@ -29,15 +29,11 @@ async def replay(
     The original steps up to fork_step_index are preserved. New steps from
     the fork point onward are re-run with the injection applied.
     """
-    try:
-        replayed_steps = await provider.replay_from(
-            steps=trace.steps,
-            fork_index=fork_step_index,
-            injection=injection.model_dump(),
-        )
-    except Exception as exc:
-        _log.warning("recut: replay_from failed at step %d: %s", fork_step_index, exc)
-        raise
+    replayed_steps = await provider.replay_from(
+        steps=trace.steps,
+        fork_index=fork_step_index,
+        injection=injection.model_dump(),
+    )
 
     engine = FlaggingEngine(mode=trace.mode)
     results = await engine.score_batch(replayed_steps, trace.prompt)

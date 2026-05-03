@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
+import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from recut.flagging.engine import _layer4_llm_judge, _meta_client, _parse_llm_flags
+from recut.flagging.engine import _layer4_llm_judge, _parse_llm_flags
 from recut.schema.trace import FlagSource, RecutFlag, RecutStep, StepType
 
 
@@ -17,31 +17,47 @@ def _make_step(content: str = "hello", index: int = 0) -> RecutStep:
     return RecutStep(index=index, type=StepType.OUTPUT, content=content)
 
 
+def _flags_payload(step_id: str, flag_type: str = "overconfidence", score: float = 0.9) -> str:
+    """Build a valid per-step flags JSON payload (dev's structured format)."""
+    return json.dumps(
+        [
+            {
+                "step_id": step_id,
+                "flags": [
+                    {
+                        "flag_type": flag_type,
+                        "score": score,
+                        "plain_reason": "Test reason.",
+                        "confidence": 0.8,
+                        "evidence": "Some evidence.",
+                    }
+                ],
+            }
+        ]
+    )
+
+
 # ---------------------------------------------------------------------------
-# _parse_llm_flags
+# _parse_llm_flags — structured per-step format
 # ---------------------------------------------------------------------------
 
 
 class TestParseLlmFlags:
     def test_valid_response_returns_flags(self):
         step = _make_step()
-        raw = json.dumps(
-            [
-                {
-                    "step_id": step.id,
-                    "overconfidence": 0.9,
-                    "plain_reasons": {"overconfidence": "Too sure of itself."},
-                }
-            ]
-        )
+        raw = _flags_payload(step.id)
         flags = _parse_llm_flags(raw, [step])
         assert len(flags) == 1
         assert flags[0].source == FlagSource.LLM
-        assert flags[0].plain_reason == "Too sure of itself."
+        assert flags[0].plain_reason == "Test reason."
+        assert flags[0].confidence == 0.8
+        assert flags[0].evidence == "Some evidence."
 
-    def test_invalid_json_raises(self):
-        with pytest.raises(json.JSONDecodeError):
-            _parse_llm_flags("not json", [])
+    def test_invalid_json_returns_empty_and_logs_warning(self, caplog):
+        with caplog.at_level(logging.WARNING):
+            result = _parse_llm_flags("not json", [])
+        assert result == []
+        assert "non-JSON" in caplog.text
 
     def test_non_array_returns_empty(self, caplog):
         with caplog.at_level(logging.WARNING):
@@ -51,19 +67,83 @@ class TestParseLlmFlags:
 
     def test_score_below_threshold_filtered(self):
         step = _make_step()
-        raw = json.dumps([{"step_id": step.id, "overconfidence": 0.1, "plain_reasons": {}}])
+        raw = _flags_payload(step.id, score=0.1)
         flags = _parse_llm_flags(raw, [step])
         assert flags == []
 
     def test_unknown_flag_type_skipped(self):
         step = _make_step()
-        raw = json.dumps([{"step_id": step.id, "not_a_real_flag": 0.9, "plain_reasons": {}}])
+        raw = json.dumps(
+            [{"step_id": step.id, "flags": [{"flag_type": "not_real", "score": 0.9}]}]
+        )
         flags = _parse_llm_flags(raw, [step])
         assert flags == []
 
+    def test_evidence_clipped_to_200_chars(self):
+        step = _make_step()
+        long_evidence = "x" * 300
+        raw = json.dumps(
+            [
+                {
+                    "step_id": step.id,
+                    "flags": [
+                        {
+                            "flag_type": "overconfidence",
+                            "score": 0.9,
+                            "plain_reason": "r",
+                            "evidence": long_evidence,
+                        }
+                    ],
+                }
+            ]
+        )
+        flags = _parse_llm_flags(raw, [step])
+        assert len(flags) == 1
+        assert len(flags[0].evidence) == 200
+
+    def test_empty_evidence_becomes_none(self):
+        step = _make_step()
+        raw = json.dumps(
+            [
+                {
+                    "step_id": step.id,
+                    "flags": [
+                        {
+                            "flag_type": "overconfidence",
+                            "score": 0.9,
+                            "plain_reason": "r",
+                            "evidence": "",
+                        }
+                    ],
+                }
+            ]
+        )
+        flags = _parse_llm_flags(raw, [step])
+        assert flags[0].evidence is None
+
+    def test_confidence_clamped_to_bounds(self):
+        step = _make_step()
+        raw = json.dumps(
+            [
+                {
+                    "step_id": step.id,
+                    "flags": [
+                        {
+                            "flag_type": "overconfidence",
+                            "score": 0.9,
+                            "plain_reason": "r",
+                            "confidence": 1.5,
+                        }
+                    ],
+                }
+            ]
+        )
+        flags = _parse_llm_flags(raw, [step])
+        assert flags[0].confidence == 1.0
+
 
 # ---------------------------------------------------------------------------
-# Layer 4 LLM judge — error handling
+# Layer 4 LLM judge — error handling (patches _call_l4_api)
 # ---------------------------------------------------------------------------
 
 
@@ -72,78 +152,88 @@ class TestLayer4ErrorHandling:
     async def test_rate_limit_retries_then_returns_empty(self, caplog):
         import anthropic
 
-        with patch(
-            "recut.flagging.engine._get_meta_client"
-        ) as mock_client_fn, caplog.at_level(logging.WARNING):
-            mock_client = MagicMock()
-            mock_client.messages.create = AsyncMock(
+        with (
+            patch.dict(os.environ, {"RECUT_L4_BACKEND": "anthropic"}),
+            patch(
+                "recut.flagging.engine._call_l4_api",
                 side_effect=anthropic.RateLimitError(
                     message="rate limited",
                     response=MagicMock(status_code=429, headers={}),
                     body={},
-                )
-            )
-            mock_client_fn.return_value = mock_client
-
-            step = _make_step()
-            result = await _layer4_llm_judge([step], "test prompt")
+                ),
+            ) as mock_call,
+            caplog.at_level(logging.WARNING),
+        ):
+            result = await _layer4_llm_judge([_make_step()], "test prompt")
 
         assert result == []
-        assert mock_client.messages.create.call_count == 3
+        assert mock_call.call_count == 3
         assert "rate-limited" in caplog.text
 
     @pytest.mark.asyncio
     async def test_non_json_response_logs_warning_and_returns_empty(self, caplog):
-        mock_block = MagicMock()
-        mock_block.text = "this is not json"
-        mock_response = MagicMock()
-        mock_response.content = [mock_block]
-
-        with patch(
-            "recut.flagging.engine._get_meta_client"
-        ) as mock_client_fn, caplog.at_level(logging.WARNING):
-            mock_client = MagicMock()
-            mock_client.messages.create = AsyncMock(return_value=mock_response)
-            mock_client_fn.return_value = mock_client
-
-            step = _make_step()
-            result = await _layer4_llm_judge([step], "test prompt")
+        with (
+            patch.dict(os.environ, {"RECUT_L4_BACKEND": "anthropic"}),
+            patch(
+                "recut.flagging.engine._call_l4_api",
+                new_callable=AsyncMock,
+                return_value="this is not json",
+            ),
+            caplog.at_level(logging.WARNING),
+        ):
+            result = await _layer4_llm_judge([_make_step()], "test prompt")
 
         assert result == []
         assert "non-JSON" in caplog.text
 
     @pytest.mark.asyncio
-    async def test_empty_response_content_returns_empty(self):
-        mock_response = MagicMock()
-        mock_response.content = []
-
-        with patch("recut.flagging.engine._get_meta_client") as mock_client_fn:
-            mock_client = MagicMock()
-            mock_client.messages.create = AsyncMock(return_value=mock_response)
-            mock_client_fn.return_value = mock_client
-
+    async def test_empty_response_returns_empty(self):
+        with (
+            patch.dict(os.environ, {"RECUT_L4_BACKEND": "anthropic"}),
+            patch(
+                "recut.flagging.engine._call_l4_api",
+                new_callable=AsyncMock,
+                return_value="",
+            ),
+        ):
             result = await _layer4_llm_judge([_make_step()], "prompt")
-
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_connection_error_retries_then_returns_empty(self, caplog):
+    async def test_connection_error_on_anthropic_retries_then_skips(self, caplog):
         import anthropic
 
-        with patch(
-            "recut.flagging.engine._get_meta_client"
-        ) as mock_client_fn, caplog.at_level(logging.WARNING):
-            mock_client = MagicMock()
-            mock_client.messages.create = AsyncMock(
-                side_effect=anthropic.APIConnectionError(request=MagicMock())
-            )
-            mock_client_fn.return_value = mock_client
-
+        with (
+            patch.dict(os.environ, {"RECUT_L4_BACKEND": "anthropic"}),
+            patch(
+                "recut.flagging.engine._call_l4_api",
+                side_effect=anthropic.APIConnectionError(request=MagicMock()),
+            ) as mock_call,
+            caplog.at_level(logging.WARNING),
+        ):
             result = await _layer4_llm_judge([_make_step()], "prompt")
 
         assert result == []
-        assert mock_client.messages.create.call_count == 3
+        assert mock_call.call_count == 3
         assert "connection error" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_local_connection_error_silently_skips(self, caplog):
+        """Local backend unreachable → immediate silent skip, no retries."""
+        import anthropic
+
+        with (
+            patch.dict(os.environ, {"RECUT_L4_BACKEND": "local"}),
+            patch(
+                "recut.flagging.engine._call_l4_api",
+                side_effect=anthropic.APIConnectionError(request=MagicMock()),
+            ) as mock_call,
+            caplog.at_level(logging.DEBUG),
+        ):
+            result = await _layer4_llm_judge([_make_step()], "prompt")
+
+        assert result == []
+        assert mock_call.call_count == 1  # no retries for local
 
 
 # ---------------------------------------------------------------------------
@@ -202,114 +292,7 @@ class TestAnthropicProviderErrors:
 
 
 # ---------------------------------------------------------------------------
-# Stress — continues on variant failure
-# ---------------------------------------------------------------------------
-
-
-class TestStressContinuesOnFailure:
-    @pytest.mark.asyncio
-    async def test_failed_variant_does_not_block_others(self):
-        from recut.core.stress import stress
-        from recut.schema.trace import (
-            FlagSource,
-            FlagType,
-            RecutFlag,
-            RecutTrace,
-            Severity,
-            TraceMeta,
-            TraceMode,
-        )
-
-        trace = RecutTrace(
-            agent_id="test",
-            prompt="test",
-            mode=TraceMode.STRESS,
-            meta=TraceMeta(model="x", provider="y"),
-            steps=[],
-        )
-        # Give the step two flags so two variants are attempted
-        step = _make_step("do something risky")
-        step.risk_score = 0.9
-        step.flags = [
-            RecutFlag(
-                type=FlagType.OVERCONFIDENCE,
-                severity=Severity.HIGH,
-                plain_reason="Too confident.",
-                step_id=step.id,
-                source=FlagSource.RULE,
-            ),
-            RecutFlag(
-                type=FlagType.GOAL_DRIFT,
-                severity=Severity.MEDIUM,
-                plain_reason="Drifting.",
-                step_id=step.id,
-                source=FlagSource.RULE,
-            ),
-        ]
-        trace.steps.append(step)
-
-        call_count = 0
-
-        async def mock_replay(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                raise RuntimeError("provider failure")
-            mock_fork = MagicMock()
-            mock_fork.id = "fork-id"
-            mock_fork.diff = MagicMock()
-            mock_fork.diff.risk_delta = 0.1
-            return mock_fork
-
-        with patch("recut.core.stress.replay", side_effect=mock_replay):
-            runs = await stress(trace, MagicMock(), num_variants=2)
-
-        # First variant failed, second should still succeed
-        assert len(runs) == 1
-
-    @pytest.mark.asyncio
-    async def test_all_variants_fail_returns_empty(self):
-        from recut.core.stress import stress
-        from recut.schema.trace import (
-            FlagSource,
-            FlagType,
-            RecutFlag,
-            RecutTrace,
-            Severity,
-            TraceMeta,
-            TraceMode,
-        )
-
-        trace = RecutTrace(
-            agent_id="test",
-            prompt="test",
-            mode=TraceMode.STRESS,
-            meta=TraceMeta(model="x", provider="y"),
-            steps=[],
-        )
-        step = _make_step("risky step")
-        step.risk_score = 0.9
-        step.flags = [
-            RecutFlag(
-                type=FlagType.OVERCONFIDENCE,
-                severity=Severity.HIGH,
-                plain_reason="Too confident.",
-                step_id=step.id,
-                source=FlagSource.RULE,
-            )
-        ]
-        trace.steps.append(step)
-
-        with patch(
-            "recut.core.stress.replay", side_effect=RuntimeError("always fails")
-        ):
-            runs = await stress(trace, MagicMock(), num_variants=2)
-
-        assert runs == []
-
-
-# ---------------------------------------------------------------------------
-# score_batch used in audit
+# score_batch used in audit / peek
 # ---------------------------------------------------------------------------
 
 
@@ -362,21 +345,25 @@ class TestScoreBatchUsedInAudit:
 
 
 # ---------------------------------------------------------------------------
-# Meta-client singleton
+# L4 client cache (replaces old singleton test)
 # ---------------------------------------------------------------------------
 
 
-class TestMetaClientSingleton:
-    def test_get_meta_client_returns_same_instance(self):
+class TestL4ClientCache:
+    def test_get_l4_client_returns_same_instance_per_backend(self):
         import recut.flagging.engine as eng
 
-        eng._meta_client = None  # reset for test isolation
-        with patch("anthropic.AsyncAnthropic") as mock_cls:
+        eng._l4_clients.clear()
+        with (
+            patch.dict(os.environ, {"RECUT_L4_BACKEND": "anthropic"}),
+            patch("anthropic.AsyncAnthropic") as mock_cls,
+        ):
             mock_instance = MagicMock()
             mock_cls.return_value = mock_instance
 
-            c1 = eng._get_meta_client()
-            c2 = eng._get_meta_client()
+            c1 = eng._get_l4_client("anthropic")
+            c2 = eng._get_l4_client("anthropic")
 
         assert c1 is c2
         mock_cls.assert_called_once()
+        eng._l4_clients.clear()

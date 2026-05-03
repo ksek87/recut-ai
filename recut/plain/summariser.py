@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from recut.schema.trace import (
+    FlagType,
     RecutFlag,
     RecutStep,
     RecutTrace,
@@ -59,8 +60,6 @@ def summarise_trace(trace: RecutTrace) -> str:
 
 def flag_suggested_action(flag: RecutFlag) -> str:
     """Return a suggested action string for a given flag."""
-    from recut.schema.trace import FlagType
-
     if flag.severity == Severity.HIGH:
         return "escalate"
     if flag.type in (FlagType.REASONING_ACTION_MISMATCH, FlagType.GOAL_DRIFT):

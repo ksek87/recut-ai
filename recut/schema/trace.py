@@ -49,6 +49,8 @@ class RecutFlag(BaseModel):
     plain_reason: str
     step_id: str
     source: FlagSource
+    confidence: float | None = None  # Layer 4 only: judge confidence in this flag (0.0–1.0)
+    evidence: str | None = None  # Layer 4 only: quoted or paraphrased evidence from the step
 
 
 class StepReasoning(BaseModel):
@@ -68,6 +70,8 @@ class RecutStep(BaseModel):
     flags: list[RecutFlag] = []
     plain_summary: str = ""
     fork_eligible: bool = True
+    token_count: int | None = None
+    token_cost: float | None = None  # cost in the configured unit (see RECUT_COST_UNIT)
 
 
 class TraceMode(StrEnum):
@@ -90,6 +94,7 @@ class TraceMeta(BaseModel):
     total_steps: int = 0
     token_count: int | None = None
     thinking_tokens: int | None = None
+    token_cost: float | None = None  # cost in the configured unit (see RECUT_COST_UNIT)
 
 
 class RecutTrace(BaseModel):

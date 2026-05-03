@@ -19,7 +19,6 @@ Quick start::
 
 from __future__ import annotations
 
-import functools
 from collections.abc import Callable
 
 from recut.core.auditor import audit, peek
@@ -31,23 +30,39 @@ from recut.export.exporter import export, load_export
 from recut.schema.hooks import FlagHandler, RecutFlagEvent
 from recut.schema.trace import TraceLanguage, TraceMode
 
-_flag_handlers: list[Callable] = []
 
+def on_flag(
+    fn: Callable | None = None,
+    *,
+    severity: str | None = None,
+    flag_type: str | None = None,
+) -> Callable:
+    """Register a global flag handler fired in all modes (peek, audit, intercept).
 
-def on_flag(fn: Callable) -> Callable:
-    """Register a handler called whenever a step is flagged during intercept."""
-    _flag_handlers.append(fn)
+    Usage::
 
-    @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        return fn(*args, **kwargs)
+        @recut.on_flag
+        def handle(event): ...
 
-    return wrapper
+        @recut.on_flag(severity="high", flag_type="overconfidence")
+        async def handle_high(event): ...
+    """
+    from recut import hooks as _hooks
+
+    def decorator(func: Callable) -> Callable:
+        _hooks.register(func, severity=severity, flag_type=flag_type)
+        return func
+
+    if fn is not None:
+        return decorator(fn)
+    return decorator
 
 
 def get_flag_handlers() -> list[Callable]:
-    """Return all registered flag handlers."""
-    return list(_flag_handlers)
+    """Return all registered global flag handler callables."""
+    from recut import hooks as _hooks
+
+    return [h for h, _ in _hooks.get_all()]
 
 
 __all__ = [
@@ -71,4 +86,4 @@ __all__ = [
     "TraceLanguage",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.4.0"

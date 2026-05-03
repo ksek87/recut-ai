@@ -1,27 +1,40 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from recut.flagging.engine import FlaggingEngine
-from recut.plain.summariser import summarise_step, summarise_trace
+from recut.hooks import fire_all, has_handlers
+from recut.plain.summariser import flag_suggested_action, summarise_step, summarise_trace
 from recut.schema.audit import AuditMode, AuditRecord, ReviewStatus, RiskProfile
+from recut.schema.hooks import RecutFlagEvent
 from recut.schema.trace import FlagType, RecutFlag, RecutTrace, Severity, TraceMode
 
+_SEVERITY_RANK = {Severity.LOW: 1, Severity.MEDIUM: 2, Severity.HIGH: 3}
 
-async def peek(trace: RecutTrace) -> AuditRecord:
+
+async def peek(
+    trace: RecutTrace,
+    flagging_depth: Literal["fast", "full"] = "fast",
+) -> AuditRecord:
     """
-    Fast triage mode. Runs layers 1-3 only. Returns high-risk steps only.
-    Never hits the LLM judge — designed to be cheap and instant.
+    Fast triage mode. Defaults to layers 1-3 only (no LLM judge).
+    Pass flagging_depth="full" to include the LLM judge on ambiguous steps.
     """
-    engine = FlaggingEngine(mode=TraceMode.PEEK)
+    engine = FlaggingEngine(mode=TraceMode.PEEK, flagging_depth=flagging_depth)
     await _score_trace_steps(trace, engine)
     return _build_audit_record(trace, AuditMode.PEEK)
 
 
-async def audit(trace: RecutTrace) -> AuditRecord:
+async def audit(
+    trace: RecutTrace,
+    flagging_depth: Literal["fast", "full"] = "full",
+) -> AuditRecord:
     """
-    Full structured audit. Runs all four flagging layers.
+    Full structured audit. Defaults to all four flagging layers.
+    Pass flagging_depth="fast" to skip the LLM judge (cheaper, instant).
     Produces a complete AuditRecord suitable for compliance review.
     """
-    engine = FlaggingEngine(mode=TraceMode.AUDIT)
+    engine = FlaggingEngine(mode=TraceMode.AUDIT, flagging_depth=flagging_depth)
     await _score_trace_steps(trace, engine)
     return _build_audit_record(trace, AuditMode.AUDIT)
 
@@ -29,11 +42,26 @@ async def audit(trace: RecutTrace) -> AuditRecord:
 async def _score_trace_steps(trace: RecutTrace, engine: FlaggingEngine) -> None:
     """Score all steps in the trace using the given engine, mutating in-place."""
     results = await engine.score_batch(trace.steps, trace.prompt)
-    for step in trace.steps:
+    _fire = has_handlers()
+
+    for i, step in enumerate(trace.steps):
         flags = results.get(step.id, [])
         step.flags = flags
         step.risk_score = _compute_risk_score(flags)
         step.plain_summary = summarise_step(step, trace.language)
+
+        if _fire and flags:
+            preceding = trace.steps[max(0, i - 2) : i]
+            for flag in flags:
+                event = RecutFlagEvent(
+                    trace_id=trace.id,
+                    step_id=step.id,
+                    flag=flag,
+                    suggested_action=flag_suggested_action(flag),
+                    preceding_steps=preceding,
+                    agent_id=trace.agent_id,
+                )
+                await fire_all(event)
 
 
 def _compute_risk_score(flags: list[RecutFlag]) -> float:
@@ -48,13 +76,8 @@ def _build_audit_record(trace: RecutTrace, mode: AuditMode) -> AuditRecord:
     all_flags = [f for step in trace.steps for f in step.flags]
     profile = _build_risk_profile(all_flags)
 
-    highest: str | None = None
-    if any(f.severity == Severity.HIGH for f in all_flags):
-        highest = Severity.HIGH.value
-    elif any(f.severity == Severity.MEDIUM for f in all_flags):
-        highest = Severity.MEDIUM.value
-    elif all_flags:
-        highest = Severity.LOW.value
+    top = max((f.severity for f in all_flags), key=lambda s: _SEVERITY_RANK.get(s, 0), default=None)
+    highest = top.value if top else None
 
     return AuditRecord(
         trace_id=trace.id,
