@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from recut.flagging.engine import _layer4_llm_judge, _parse_llm_flags
-from recut.schema.trace import FlagSource, RecutFlag, RecutStep, StepType
+from recut.schema.trace import FlagSource, RecutStep, StepType
 
 
 def _make_step(content: str = "hello", index: int = 0) -> RecutStep:
