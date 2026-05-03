@@ -4,13 +4,10 @@ import json
 import os
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, col, create_engine, select
 
-if TYPE_CHECKING:
-    from recut.schema.trace import RecutTrace
-
+from recut.schema.trace import RecutStep, RecutTrace, TraceLanguage, TraceMeta, TraceMode
 from recut.storage.models import AuditRow, FlagCache, ForkRow, TraceRow  # noqa: F401
 
 _engine = None
@@ -53,11 +50,20 @@ class StorageClient:
             return session.get(TraceRow, trace_id)
 
     def load_trace(self, trace_id: str) -> RecutTrace | None:
-        from recut.schema.trace import RecutStep, RecutTrace, TraceLanguage, TraceMeta, TraceMode
-
         row = self.get_trace_row(trace_id)
-        if not row:
-            return None
+        return self._row_to_trace(row) if row else None
+
+    def load_recent_traces(self, agent_id: str, limit: int = 50) -> list[RecutTrace]:
+        with self._get_session() as session:
+            rows = session.exec(
+                select(TraceRow)
+                .where(TraceRow.agent_id == agent_id)
+                .order_by(col(TraceRow.created_at).desc())
+                .limit(limit)
+            ).all()
+        return [t for row in rows if (t := self._row_to_trace(row))]
+
+    def _row_to_trace(self, row: TraceRow) -> RecutTrace:
         steps = [RecutStep(**s) for s in json.loads(row.steps_json)]
         return RecutTrace(
             id=row.id,

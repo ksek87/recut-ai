@@ -16,6 +16,7 @@ _SOURCE_LABEL: dict[FlagSource, str] = {
     FlagSource.EMBEDDING: "[dim]\\[embedding][/dim]",
     FlagSource.NATIVE: "[bold]\\[native][/bold]",
     FlagSource.LLM: "[cyan]\\[judge][/cyan]",
+    FlagSource.FINGERPRINT: "[magenta]\\[fingerprint][/magenta]",
 }
 
 
