@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import json
+import logging
 import os
 import random
 import time
@@ -21,6 +22,8 @@ from recut.schema.trace import (
 from recut.storage.circuit_breaker import is_open, record_failure, record_success
 from recut.storage.db import StorageClient
 from recut.storage.models import TraceRow
+
+_log = logging.getLogger(__name__)
 
 
 class RecutContext:
@@ -91,7 +94,14 @@ def trace(
         @functools.wraps(fn)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
             # Selective tracing — honour sample_rate
-            effective_rate = float(os.environ.get("RECUT_DEFAULT_SAMPLE_RATE", sample_rate))
+            try:
+                effective_rate = float(os.environ.get("RECUT_DEFAULT_SAMPLE_RATE", sample_rate))
+            except (ValueError, TypeError):
+                _log.warning(
+                    "recut: invalid RECUT_DEFAULT_SAMPLE_RATE env var; using default %s",
+                    sample_rate,
+                )
+                effective_rate = float(sample_rate)
             if random.random() > effective_rate:
                 return await fn(*args, **kwargs)
 
@@ -116,9 +126,14 @@ def trace(
                 flag_handlers=flag_handlers or [],
             )
 
-            # Honour trace_if predicate
-            if trace_if is not None and not trace_if(ctx):
-                return await fn(*args, **kwargs)
+            # trace_if exceptions are caught and treated as False (skip tracing)
+            if trace_if is not None:
+                try:
+                    if not trace_if(ctx):
+                        return await fn(*args, **kwargs)
+                except Exception as exc:  # noqa: BLE001
+                    _log.warning("recut: trace_if predicate raised %r; skipping trace", exc)
+                    return await fn(*args, **kwargs)
 
             kwargs["ctx"] = ctx
             result = await fn(*args, **kwargs)

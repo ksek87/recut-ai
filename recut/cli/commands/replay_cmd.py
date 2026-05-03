@@ -38,6 +38,13 @@ async def _replay_async(
         console.print(f"[red]Trace not found:[/red] {trace_id}")
         raise typer.Exit(1)
 
+    if step_index < 0 or step_index >= len(trace.steps):
+        console.print(
+            f"[red]Step index {step_index} out of range[/red] "
+            f"(trace has {len(trace.steps)} steps: 0–{len(trace.steps) - 1})"
+        )
+        raise typer.Exit(1)
+
     try:
         inject_data = json.loads(inject_json)
     except json.JSONDecodeError:
@@ -46,7 +53,7 @@ async def _replay_async(
 
     injection = ForkInjection(
         target=InjectionTarget(inject_data.get("target", "tool_result")),
-        original_content=trace.steps[step_index].content if step_index < len(trace.steps) else "",
+        original_content=trace.steps[step_index].content,
         injected_content=inject_data.get("injected_content", ""),
     )
 
