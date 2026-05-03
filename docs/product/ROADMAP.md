@@ -1,6 +1,6 @@
 # recut-ai Roadmap
 
-**Current:** `v0.4` in progress
+**Current:** `v0.5` in progress — PyPI-ready, 215 tests passing
 
 > **Plan alignment:** v0.1–v0.5 map directly to Phases 1–5 in [RECUT_PLAN.md](RECUT_PLAN.md). v0.6–v0.8 are additions beyond the original build spec: integrations, production hardening, and enterprise features developed in response to market research. The build order within each version follows the phase notes in RECUT_PLAN.md.
 
@@ -24,9 +24,7 @@
 - [x] Build plain language summariser
 - [x] Streaming trace capture + flag result caching
 
-## v0.3 — Modes
-
-### Completed
+## v0.3 — Modes ✅
 
 - [x] Peek mode — fast triage, surfaces high-risk steps only
 - [x] Audit mode — full structured pass, `AuditRecord` output
@@ -36,7 +34,7 @@
 - [x] Selective tracing (`sample_rate`, `trace_if`)
 - [x] `flagging_depth: "fast" | "full"` — fast = layers 1-3 only (zero meta-LLM cost), full = all 4 layers; defaults to fast
 
-### Performance & Resilience (shipped in perf/error-handling PR)
+### Performance & Resilience ✅
 
 - [x] `score_batch()` used throughout — auditor and replayer no longer call `score_step()` in a sequential loop; N steps → one batched LLM-judge call
 - [x] `_layer2_embeddings_batch()` — all step contents encoded in a single `model.encode()` call; 2-3× faster for traces with more than 10 steps
@@ -48,46 +46,35 @@
 - [x] LLM error handling with backoff — `RateLimitError` retried 3× (5s/10s), `APIConnectionError` retried 3× (1s/2s); `JSONDecodeError` separated from API errors; warnings logged instead of silent swallow
 - [x] Configurable provider timeouts — `httpx.Timeout(60s)` on both Anthropic and OpenAI clients; override with `RECUT_API_TIMEOUT`
 
-### Remaining
+### Output & Attribution ✅
 
-- [ ] Per-layer flag attribution — every flag shows which layer fired it (`[rule]`, `[embedding]`, `[native]`, `[judge]`) in peek and audit output
-- [ ] Token cost attribution — `token_cost_usd` per step and per trace surfaced in `peek` output and TUI dashboard (schema fields exist; CLI display not yet wired)
-- [ ] Structured LLM judge output — layer 4 returns per-flag `confidence` (0-1) and `evidence` (quoted step text) alongside score; no free-text black-box verdicts
+- [x] Per-layer flag attribution — every flag shows which layer fired it (`[rule]`, `[embedding]`, `[native]`, `[judge]`) in peek and audit output; `[native]` is visually distinct
+- [x] Token cost tracking — `token_cost` per step and per trace (currency-agnostic numeric field; `RECUT_COST_UNIT` controls display label, default `USD`); surfaced in peek output and audit TUI. `RECUT_PRICE_INPUT` / `RECUT_PRICE_OUTPUT` per-million-token overrides for discounted or non-USD billing
+- [x] Structured LLM judge output — layer 4 returns per-flag `confidence` (0-1) and `evidence` (quoted step text) alongside score; `RecutFlag.confidence` and `RecutFlag.evidence` fields added to schema
 
-### Layer 4 — Bring Your Own Model (local-first)
+### Layer 4 — Bring Your Own Model ✅
 
-Layer 4 is the LLM judge. It should never require an API key or send data to a third party by default. Currently defaults to Anthropic — local-first backend is the next implementation priority.
-
-- [ ] `RECUT_L4_BACKEND=local` (target default) — any OpenAI-compatible local endpoint
-- [ ] `RECUT_L4_LOCAL_URL=http://localhost:11434/v1` — Ollama, LM Studio, Jan, llama.cpp server, vLLM, Hugging Face TGI, etc.
-- [ ] `RECUT_L4_LOCAL_MODEL=llama3.2` — any model available on your local runtime
-- [ ] Silent skip if local endpoint is unreachable — no error, no cost, no data exfiltration
-
-**Remote API (BYOK — bring your own key):**
-- [x] `RECUT_L4_BACKEND=anthropic` — current default; uses `ANTHROPIC_API_KEY`
-- [ ] `RECUT_L4_BACKEND=openai` — `OPENAI_API_KEY` from env; `RECUT_META_MODEL` selects model
-
-**Remote call limit (configurable, default 20%):**
-- [ ] `RECUT_L4_REMOTE_MAX_PCT=0.20` — at most 20% of total steps in a trace may escalate to the remote API Layer 4 judge; the rest are handled by the local model or skipped
-- [ ] Applies only when `RECUT_L4_BACKEND` is a remote API — local models are uncapped
-- [ ] `RECUT_L4_MAX_REMOTE_CALLS=N` — hard per-trace integer cap; whichever limit is hit first applies
-- [ ] Sampling within the cap weighted toward `tool_call` and `output` steps — the highest-stakes step types
-
-**Marketing framing:** Layer 4 uses a local model by default — your choice of runtime, your choice of model. No data leaves your machine. If you want higher-accuracy judgment on ambiguous steps, bring your own API key and set your own limits.
+- [x] `RECUT_L4_BACKEND=local` (default) — dispatches to any OpenAI-compatible local endpoint (`RECUT_L4_LOCAL_URL`, `RECUT_L4_LOCAL_MODEL`)
+- [x] Local endpoint unreachable → Layer 4 silently skipped; no error, no cost, no data exfiltration
+- [x] `RECUT_L4_BACKEND=anthropic` — BYOK via `ANTHROPIC_API_KEY`
+- [x] `RECUT_L4_BACKEND=openai` — BYOK via `OPENAI_API_KEY`; `RECUT_META_MODEL` selects model
+- [ ] Remote call cap — `RECUT_L4_REMOTE_MAX_PCT=0.20` and `RECUT_L4_MAX_REMOTE_CALLS=N` (tracked in issue #27; depends on backend dispatcher being stable first)
 
 ## v0.4 — CLI + TUI
 
 - [x] Typer CLI commands: `run`, `intercept`, `replay`, `diff`, `peek`, `audit`, `stress`, `export`
-- [ ] Textual TUI — peek queue view
-- [ ] Textual TUI — audit walkthrough view
-- [ ] Textual TUI — side-by-side diff view
+- [x] Textual TUI — audit walkthrough view (shipped as part of P1 work)
+- [ ] Textual TUI — peek queue view (tracked in issue #25)
+- [ ] Textual TUI — side-by-side diff view (tracked in issue #25)
 
-## v0.5 — Export + Hooks
+## v0.5 — Export, Hooks & PyPI ✅
 
 - [x] `.recut.json` exporter
 - [x] OpenAI provider — inferred reasoning fallback
-- [x] Internal flag handler system (`FlagHandler`, `RecutFlagEvent`, wired into intercept mode)
-- [ ] `@recut.on_flag` public decorator — expose the internal handler system as a first-class public API on the `recut` module
+- [x] `@recut.on_flag` public decorator — fires in peek, audit, and intercept modes; supports `severity` and `flag_type` filter kwargs; registered handlers never propagate exceptions to the agent caller
+- [x] `pyproject.toml` v0.3.0 — description, classifiers (`Framework::AsyncIO`, `Typing::Typed`), keywords, `requires-python>=3.11`
+- [x] `recut/py.typed` marker — PEP 561 typed package
+- [x] PyPI publish workflow — OIDC trusted publishing on `v*.*.*` tags; TestPyPI on every `main` merge; `twine check` gate before upload
 
 ## v0.6 — Integrations (SDK-First, Adapter Architecture)
 
@@ -131,18 +118,18 @@ See [INTEGRATIONS.md](INTEGRATIONS.md) for full design detail.
 
 See [ENTERPRISE.md](ENTERPRISE.md) for full detail.
 
-- [ ] PII & secret scrubber — runs in-process before any write or export
+- [ ] PII & secret scrubber — runs in-process before any write or export (issue #29)
 - [ ] Reasoning block sensitivity controls (`store_native`, `export_native`, `truncate_native_at`)
-- [ ] Trace integrity sealing — SHA-256 content hash, tamper-evident audit records
+- [ ] Trace integrity sealing — SHA-256 content hash, tamper-evident audit records (issue #29)
 - [ ] Data residency controls — `RECUT_INTEGRATION_ALLOWLIST`, `RECUT_EXPORT_ALLOWED`
 - [ ] PostgreSQL storage backend — for multi-process / high-volume deployments
-- [ ] Async write queue with backpressure and graceful drop — DB writes are currently synchronous in the agent hot path
-- [ ] Trace size limits (`RECUT_MAX_STEPS_PER_TRACE`, `RECUT_MAX_CONTENT_LENGTH`)
-- [ ] Retention & auto-cleanup (`RECUT_TRACE_TTL_DAYS`, `recut db vacuum`)
-- [ ] CLI audit log (`~/.recut/audit.log`) — timestamp, user, command, trace ID
+- [ ] Async write queue with backpressure and graceful drop — DB writes are currently synchronous in the agent hot path (issue #26)
+- [ ] Trace size limits (`RECUT_MAX_STEPS_PER_TRACE`, `RECUT_MAX_CONTENT_LENGTH`) (issue #29)
+- [ ] Retention & auto-cleanup (`RECUT_TRACE_TTL_DAYS`, `recut db vacuum`) (issue #29)
+- [ ] CLI audit log (`~/.recut/audit.log`) — timestamp, user, command, trace ID (issue #29)
 - [ ] Compliance export format (`recut export --format compliance`)
 - [ ] PagerDuty alerter — production on-call integration with dedup and severity routing
-- [ ] **Behavioral fingerprinting** — per-agent baseline profiles built from local trace history (SQLite); new runs scored by Z-score deviation ("3.1σ more tool calls than baseline"); fully local, no model, no API; surfaces as `[fingerprint]` flag source in peek output
+- [ ] **Behavioral fingerprinting** — per-agent baseline profiles built from local trace history (SQLite); new runs scored by Z-score deviation ("3.1σ more tool calls than baseline"); fully local, no model, no API; surfaces as `[fingerprint]` flag source in peek output (issue #28)
 - [ ] **`recut calibrate`** — reads human audit review outcomes (`AuditRecord.review_status`) from local store, adjusts per-flag-type decision thresholds; fingerprinting and flagging improve from your own production data over time
 - [ ] **Per-agent sampling overrides** — `sample_rate` per agent_id, not just globally; severity-weighted sampling (high-risk agents always at 100%, low-risk at configurable rate)
 - [ ] **Hard budget kill-switch** — `budget_hard_limit=True` on `@recut.trace()` raises `RecutBudgetExceededError` and fires on_flag hook when token budget is exceeded, not just a warning log
@@ -150,13 +137,13 @@ See [ENTERPRISE.md](ENTERPRISE.md) for full detail.
 ## v0.8 — Tests ✅
 
 - [x] Record trace fixtures for offline testing (`tests/fixtures/`)
-- [x] Test suite — schema, flagging, replay, tracer (134 tests passing)
+- [x] Test suite — schema, flagging, replay, tracer, P0 features, P1 features (215 tests passing)
 
 ## v1.0 — Stable Release
 
 - [ ] Public API freeze
 - [ ] Full docs + examples
-- [ ] PyPI publish
+- [ ] PyPI publish (pipeline ready — awaiting v1.0 tag)
 
 ## v1.5 — Polish
 
