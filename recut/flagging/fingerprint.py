@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Sequence
 
 from recut.schema.trace import FlagSource, FlagType, RecutFlag, RecutTrace, Severity
 
@@ -77,18 +78,18 @@ def _avg_risk(trace: RecutTrace) -> float:
     return _mean(scored)
 
 
-def _mean(values: list[float]) -> float:
+def _mean(values: Sequence[float]) -> float:
     return sum(values) / len(values) if values else 0.0
 
 
-def _stddev(values: list[float]) -> float:
+def _stddev(values: Sequence[float]) -> float:
     if len(values) < 2:
         return 0.0
     m = _mean(values)
     return math.sqrt(sum((v - m) ** 2 for v in values) / (len(values) - 1))
 
 
-def _zscore(value: float, population: list[float]) -> float | None:
+def _zscore(value: float, population: Sequence[float]) -> float | None:
     if len(population) < 2:
         return None
     sd = _stddev(population)

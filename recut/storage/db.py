@@ -5,7 +5,7 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel import Session, SQLModel, col, create_engine, select
 
 from recut.schema.trace import RecutStep, RecutTrace, TraceLanguage, TraceMeta, TraceMode
 from recut.storage.models import AuditRow, FlagCache, ForkRow, TraceRow  # noqa: F401
@@ -58,7 +58,7 @@ class StorageClient:
             rows = session.exec(
                 select(TraceRow)
                 .where(TraceRow.agent_id == agent_id)
-                .order_by(TraceRow.created_at.desc())
+                .order_by(col(TraceRow.created_at).desc())
                 .limit(limit)
             ).all()
         return [t for row in rows if (t := self._row_to_trace(row))]
