@@ -35,6 +35,7 @@ class FlagSource(StrEnum):
     EMBEDDING = "embedding"  # layer 2 — cheap similarity
     NATIVE = "native"  # layer 3 — thinking block analysis, Claude only
     LLM = "llm"  # layer 4 — meta-LLM judgment
+    FINGERPRINT = "fingerprint"  # statistical deviation from per-agent baseline
 
 
 class Severity(StrEnum):

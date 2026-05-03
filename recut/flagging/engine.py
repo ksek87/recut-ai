@@ -27,6 +27,8 @@ from recut.schema.trace import (
     StepType,
     TraceMode,
 )
+from recut.storage.db import StorageClient
+from recut.storage.models import FlagCache
 
 _log = logging.getLogger(__name__)
 
@@ -671,8 +673,6 @@ async def _get_cached_flags(content_hash: str) -> list[RecutFlag] | None:
         del _mem_cache[content_hash]
 
     try:
-        from recut.storage.db import StorageClient
-
         client = StorageClient()
         loop = asyncio.get_running_loop()
         row = await loop.run_in_executor(None, client.get_cached_flags, content_hash)
@@ -700,9 +700,6 @@ async def _cache_flags(content_hash: str, flags: list[RecutFlag]) -> None:
     _mem_cache[content_hash] = (flags, expires_at)
 
     try:
-        from recut.storage.db import StorageClient
-        from recut.storage.models import FlagCache
-
         now = datetime.now(UTC)
         row = FlagCache(
             content_hash=content_hash,

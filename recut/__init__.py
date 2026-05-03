@@ -25,7 +25,7 @@ from recut.core.auditor import audit, peek
 from recut.core.interceptor import InterceptSession, intercept
 from recut.core.replayer import diff, replay
 from recut.core.stress import stress
-from recut.core.tracer import RecutContext, trace, trace_context
+from recut.core.tracer import RecutBudgetExceededError, RecutContext, trace, trace_context
 from recut.export.exporter import export, load_export
 from recut.schema.hooks import FlagHandler, RecutFlagEvent
 from recut.schema.trace import TraceLanguage, TraceMode
@@ -69,6 +69,7 @@ __all__ = [
     "trace",
     "trace_context",
     "RecutContext",
+    "RecutBudgetExceededError",
     "intercept",
     "InterceptSession",
     "replay",
