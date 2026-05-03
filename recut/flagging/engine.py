@@ -564,30 +564,37 @@ async def _layer4_llm_judge(
 
 
 def _parse_llm_flags(raw: str, steps: list[RecutStep]) -> list[RecutFlag]:
-    """Parse the JSON response from the LLM judge into RecutFlag objects."""
+    """Parse the structured per-flag JSON from the LLM judge into RecutFlag objects."""
     try:
         results = json.loads(raw)
     except json.JSONDecodeError as exc:
         _log.warning("recut: Layer 4 returned non-JSON (%.80s…): %s", raw, exc)
         return []
 
+    if not isinstance(results, list):
+        _log.warning("recut: Layer 4 response is not a JSON array")
+        return []
+
     flags: list[RecutFlag] = []
     thresholds = Thresholds()
 
     for result in results:
+        if not isinstance(result, dict):
+            continue
         step_id = result.get("step_id", "")
-        plain_reasons = result.get("plain_reasons", {})
+        raw_flags = result.get("flags", [])
+        if not isinstance(raw_flags, list):
+            continue
 
-        for flag_name, score in result.items():
-            if flag_name in ("step_id", "plain_reasons"):
+        for entry in raw_flags:
+            if not isinstance(entry, dict):
                 continue
-            if not isinstance(score, (int, float)):
-                continue
-            if score < thresholds.LOW:
+            score = entry.get("score", 0.0)
+            if not isinstance(score, (int, float)) or score < thresholds.LOW:
                 continue
 
             try:
-                flag_type = FlagType(flag_name)
+                flag_type = FlagType(entry.get("flag_type", ""))
             except ValueError:
                 continue
 
@@ -599,15 +606,26 @@ def _parse_llm_flags(raw: str, steps: list[RecutStep]) -> list[RecutFlag]:
                 else Severity.LOW
             )
 
+            raw_confidence = entry.get("confidence")
+            confidence = (
+                float(max(0.0, min(1.0, raw_confidence)))
+                if isinstance(raw_confidence, (int, float))
+                else None
+            )
+            evidence = entry.get("evidence") or None
+            if isinstance(evidence, str):
+                evidence = evidence[:200].strip() or None
+
             flags.append(
                 RecutFlag(
                     type=flag_type,
                     severity=severity,
-                    plain_reason=plain_reasons.get(
-                        flag_name, f"Flagged by meta-LLM with score {score:.2f}."
-                    ),
+                    plain_reason=entry.get("plain_reason")
+                    or f"Flagged by meta-LLM (score {score:.2f}).",
                     step_id=step_id,
                     source=FlagSource.LLM,
+                    confidence=confidence,
+                    evidence=evidence,
                 )
             )
 

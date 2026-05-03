@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 import httpx
 import openai as _openai
 
+from recut.providers._pricing import OPENAI_PRICING, resolve_cost
 from recut.providers.base import AbstractProvider
 from recut.schema.trace import (
     ReasoningSource,
@@ -110,7 +111,19 @@ class OpenAIProvider(AbstractProvider):
             return
         choice = response.choices[0]
 
+        usage = getattr(response, "usage", None)
+        input_tokens = getattr(usage, "prompt_tokens", 0) if usage else 0
+        output_tokens = getattr(usage, "completion_tokens", 0) if usage else 0
+        total_tokens = input_tokens + output_tokens
+        cost = resolve_cost(
+            OPENAI_PRICING, self.model, input_tokens, output_tokens, strip_date_suffix=True
+        )
+
         if choice.message.tool_calls:
+            n_steps = max(len(choice.message.tool_calls), 1)
+            per_step_tokens = total_tokens // n_steps
+            per_step_cost = cost / n_steps if cost is not None else None
+
             for tc in choice.message.tool_calls:
                 reasoning = (
                     await self._infer_reasoning(json.dumps(tc.function.__dict__))
@@ -122,6 +135,8 @@ class OpenAIProvider(AbstractProvider):
                     type=StepType.TOOL_CALL,
                     content=json.dumps({"name": tc.function.name, "input": tc.function.arguments}),
                     reasoning=reasoning,
+                    token_count=per_step_tokens,
+                    token_cost=per_step_cost,
                 )
                 step_index += 1
         else:
@@ -132,6 +147,8 @@ class OpenAIProvider(AbstractProvider):
                 type=StepType.OUTPUT,
                 content=content,
                 reasoning=reasoning,
+                token_count=total_tokens,
+                token_cost=cost,
             )
 
     async def replay_from(
