@@ -73,9 +73,7 @@ class TestParseLlmFlags:
 
     def test_unknown_flag_type_skipped(self):
         step = _make_step()
-        raw = json.dumps(
-            [{"step_id": step.id, "flags": [{"flag_type": "not_real", "score": 0.9}]}]
-        )
+        raw = json.dumps([{"step_id": step.id, "flags": [{"flag_type": "not_real", "score": 0.9}]}])
         flags = _parse_llm_flags(raw, [step])
         assert flags == []
 
@@ -310,11 +308,14 @@ class TestScoreBatchUsedInAudit:
             steps=[_make_step()],
         )
 
-        with patch(
-            "recut.core.auditor.FlaggingEngine.score_batch", new_callable=AsyncMock
-        ) as mock_batch, patch(
-            "recut.core.auditor.FlaggingEngine.score_step", new_callable=AsyncMock
-        ) as mock_step:
+        with (
+            patch(
+                "recut.core.auditor.FlaggingEngine.score_batch", new_callable=AsyncMock
+            ) as mock_batch,
+            patch(
+                "recut.core.auditor.FlaggingEngine.score_step", new_callable=AsyncMock
+            ) as mock_step,
+        ):
             mock_batch.return_value = {}
             await audit(trace)
             mock_batch.assert_called_once()
@@ -333,11 +334,14 @@ class TestScoreBatchUsedInAudit:
             steps=[_make_step()],
         )
 
-        with patch(
-            "recut.core.auditor.FlaggingEngine.score_batch", new_callable=AsyncMock
-        ) as mock_batch, patch(
-            "recut.core.auditor.FlaggingEngine.score_step", new_callable=AsyncMock
-        ) as mock_step:
+        with (
+            patch(
+                "recut.core.auditor.FlaggingEngine.score_batch", new_callable=AsyncMock
+            ) as mock_batch,
+            patch(
+                "recut.core.auditor.FlaggingEngine.score_step", new_callable=AsyncMock
+            ) as mock_step,
+        ):
             mock_batch.return_value = {}
             await peek(trace)
             mock_batch.assert_called_once()
