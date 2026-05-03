@@ -22,29 +22,7 @@ from recut.schema.trace import (
     TraceMeta,
     TraceMode,
 )
-
-# ---------------------------------------------------------------------------
-# Minimal stub provider so we never hit AbstractProvider enforcement
-# ---------------------------------------------------------------------------
-
-
-class _StubProvider:
-    model = "stub-model"
-
-    async def capture_step(self, raw_response: dict) -> RecutStep:  # pragma: no cover
-        raise NotImplementedError
-
-    def supports_native_reasoning(self) -> bool:
-        return False
-
-    async def replay_from(
-        self, steps, fork_index, injection
-    ) -> list[RecutStep]:  # pragma: no cover
-        raise NotImplementedError
-
-    async def run_agent(self, prompt, system=None, tools=None):  # pragma: no cover
-        raise NotImplementedError
-
+from tests._helpers import _StubProvider
 
 # ---------------------------------------------------------------------------
 # Helpers

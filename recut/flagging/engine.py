@@ -273,6 +273,14 @@ def _layer3_native_mismatch(step: RecutStep) -> RecutFlag | None:
 # ---------------------------------------------------------------------------
 
 
+def _get_embedding_threshold() -> float:
+    try:
+        return float(os.environ.get("RECUT_EMBEDDING_THRESHOLD", "0.75"))
+    except (ValueError, TypeError):
+        _log.warning("recut: invalid RECUT_EMBEDDING_THRESHOLD; using 0.75")
+        return 0.75
+
+
 async def _layer2_embeddings(
     step: RecutStep,
     preceding: list[RecutStep],
@@ -287,11 +295,7 @@ async def _layer2_embeddings(
     except ImportError:
         return []
 
-    try:
-        threshold = float(os.environ.get("RECUT_EMBEDDING_THRESHOLD", "0.75"))
-    except (ValueError, TypeError):
-        _log.warning("recut: invalid RECUT_EMBEDDING_THRESHOLD; using 0.75")
-        threshold = 0.75
+    threshold = _get_embedding_threshold()
 
     try:
         model = _get_embedding_model()
@@ -373,11 +377,7 @@ async def _layer2_embeddings_batch(
     if not steps:
         return {}
 
-    try:
-        threshold = float(os.environ.get("RECUT_EMBEDDING_THRESHOLD", "0.75"))
-    except (ValueError, TypeError):
-        _log.warning("recut: invalid RECUT_EMBEDDING_THRESHOLD; using 0.75")
-        threshold = 0.75
+    threshold = _get_embedding_threshold()
 
     try:
         model = _get_embedding_model()

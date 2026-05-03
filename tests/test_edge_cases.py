@@ -9,6 +9,7 @@ import logging
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import click
 import pytest
 from pydantic import ValidationError
 
@@ -22,28 +23,7 @@ from recut.schema.trace import (
     Severity,
     StepType,
 )
-
-# ---------------------------------------------------------------------------
-# Stub provider
-# ---------------------------------------------------------------------------
-
-
-class _StubProvider:
-    model = "stub-model"
-
-    async def capture_step(self, raw_response: dict) -> RecutStep:  # pragma: no cover
-        raise NotImplementedError
-
-    def supports_native_reasoning(self) -> bool:
-        return False
-
-    async def replay_from(  # pragma: no cover
-        self, steps, fork_index, injection
-    ) -> list[RecutStep]:
-        raise NotImplementedError
-
-    async def run_agent(self, prompt, system=None, tools=None):  # pragma: no cover
-        raise NotImplementedError
+from tests._helpers import _StubProvider
 
 
 def _make_flag(**kwargs) -> RecutFlag:
@@ -354,10 +334,9 @@ class TestAuditorEdgeCases:
 
 
 class TestReplayCmdBoundsCheck:
-    async def test_out_of_bounds_step_index_exits_with_error(self):
-        """_replay_async with step_index >= len(trace.steps) should raise Exit."""
-        import click
-
+    @pytest.mark.parametrize("step_index", [99, -1])
+    async def test_out_of_bounds_step_index_exits_with_error(self, step_index: int):
+        """_replay_async with an out-of-bounds step_index should raise Exit(1)."""
         from recut.cli.commands.replay_cmd import _replay_async
         from recut.schema.trace import TraceMeta, TraceMode
 
@@ -367,8 +346,7 @@ class TestReplayCmdBoundsCheck:
             mode=TraceMode.PEEK,
             meta=TraceMeta(model="m", provider="p"),
         )
-        step = RecutStep(index=0, type=StepType.OUTPUT, content="hello")
-        trace_obj.steps.append(step)
+        trace_obj.steps.append(RecutStep(index=0, type=StepType.OUTPUT, content="hello"))
 
         mock_client = MagicMock()
         mock_client.load_trace.return_value = trace_obj
@@ -377,34 +355,7 @@ class TestReplayCmdBoundsCheck:
             patch("recut.storage.db.StorageClient", return_value=mock_client),
             pytest.raises(click.exceptions.Exit) as exc_info,
         ):
-            await _replay_async("trace-id-123", 99, '{"injected_content": "x"}')
-
-        assert exc_info.value.exit_code == 1
-
-    async def test_negative_step_index_exits_with_error(self):
-        """_replay_async with step_index < 0 should raise Exit."""
-        import click
-
-        from recut.cli.commands.replay_cmd import _replay_async
-        from recut.schema.trace import TraceMeta, TraceMode
-
-        trace_obj = RecutTrace(
-            agent_id="test",
-            prompt="hello",
-            mode=TraceMode.PEEK,
-            meta=TraceMeta(model="m", provider="p"),
-        )
-        step = RecutStep(index=0, type=StepType.OUTPUT, content="hello")
-        trace_obj.steps.append(step)
-
-        mock_client = MagicMock()
-        mock_client.load_trace.return_value = trace_obj
-
-        with (
-            patch("recut.storage.db.StorageClient", return_value=mock_client),
-            pytest.raises(click.exceptions.Exit) as exc_info,
-        ):
-            await _replay_async("trace-id-123", -1, '{"injected_content": "x"}')
+            await _replay_async("trace-id-123", step_index, '{"injected_content": "x"}')
 
         assert exc_info.value.exit_code == 1
 
@@ -415,12 +366,23 @@ class TestReplayCmdBoundsCheck:
 
 
 class TestCLIInvalidTraceID:
-    async def test_peek_cmd_missing_trace_exits(self):
-        """_peek_async with an unknown trace ID raises Exit(1)."""
-        import click
+    @pytest.mark.parametrize(
+        "cmd_module,cmd_fn,args",
+        [
+            ("recut.cli.commands.peek_cmd", "_peek_async", ("nonexistent-trace-id",)),
+            ("recut.cli.commands.audit_cmd", "_audit_async", ("nonexistent-trace-id",)),
+            (
+                "recut.cli.commands.replay_cmd",
+                "_replay_async",
+                ("bad-id", 0, '{"injected_content": "x"}'),
+            ),
+        ],
+    )
+    async def test_missing_trace_exits(self, cmd_module: str, cmd_fn: str, args: tuple):
+        """Any CLI command with an unknown trace ID raises Exit(1)."""
+        import importlib
 
-        from recut.cli.commands.peek_cmd import _peek_async
-
+        fn = getattr(importlib.import_module(cmd_module), cmd_fn)
         mock_client = MagicMock()
         mock_client.load_trace.return_value = None
 
@@ -428,48 +390,12 @@ class TestCLIInvalidTraceID:
             patch("recut.storage.db.StorageClient", return_value=mock_client),
             pytest.raises(click.exceptions.Exit) as exc_info,
         ):
-            await _peek_async("nonexistent-trace-id")
-
-        assert exc_info.value.exit_code == 1
-
-    async def test_audit_cmd_missing_trace_exits(self):
-        """_audit_async with an unknown trace ID raises Exit(1)."""
-        import click
-
-        from recut.cli.commands.audit_cmd import _audit_async
-
-        mock_client = MagicMock()
-        mock_client.load_trace.return_value = None
-
-        with (
-            patch("recut.storage.db.StorageClient", return_value=mock_client),
-            pytest.raises(click.exceptions.Exit) as exc_info,
-        ):
-            await _audit_async("nonexistent-trace-id")
-
-        assert exc_info.value.exit_code == 1
-
-    async def test_replay_cmd_missing_trace_exits(self):
-        """_replay_async with an unknown trace ID raises Exit(1)."""
-        import click
-
-        from recut.cli.commands.replay_cmd import _replay_async
-
-        mock_client = MagicMock()
-        mock_client.load_trace.return_value = None
-
-        with (
-            patch("recut.storage.db.StorageClient", return_value=mock_client),
-            pytest.raises(click.exceptions.Exit) as exc_info,
-        ):
-            await _replay_async("bad-id", 0, '{"injected_content": "x"}')
+            await fn(*args)
 
         assert exc_info.value.exit_code == 1
 
     async def test_replay_cmd_invalid_json_inject_exits(self):
         """_replay_async with malformed JSON for inject raises Exit(1)."""
-        import click
-
         from recut.cli.commands.replay_cmd import _replay_async
         from recut.schema.trace import TraceMeta, TraceMode
 
@@ -479,8 +405,7 @@ class TestCLIInvalidTraceID:
             mode=TraceMode.PEEK,
             meta=TraceMeta(model="m", provider="p"),
         )
-        step = RecutStep(index=0, type=StepType.OUTPUT, content="hello")
-        trace_obj.steps.append(step)
+        trace_obj.steps.append(RecutStep(index=0, type=StepType.OUTPUT, content="hello"))
 
         mock_client = MagicMock()
         mock_client.load_trace.return_value = trace_obj

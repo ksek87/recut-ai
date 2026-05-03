@@ -126,7 +126,7 @@ def trace(
                 flag_handlers=flag_handlers or [],
             )
 
-            # Honour trace_if predicate — exceptions are logged and treated as False
+            # trace_if exceptions are caught and treated as False (skip tracing)
             if trace_if is not None:
                 try:
                     if not trace_if(ctx):
