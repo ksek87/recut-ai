@@ -6,7 +6,11 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from recut.cli.tui.peek_view import PeekView
+from recut.core.auditor import peek
+from recut.providers._pricing import format_cost
 from recut.schema.trace import FlagSource, Severity
+from recut.storage.db import StorageClient
 
 app = typer.Typer(help="Quick triage of a recorded trace.")
 console = Console()
@@ -30,10 +34,6 @@ def peek_cmd(
 
 
 async def _peek_async(trace_id: str, *, tui: bool = False) -> None:
-    from recut.cli.tui.peek_view import PeekView
-    from recut.core.auditor import peek
-    from recut.storage.db import StorageClient
-
     client = StorageClient()
     trace = client.load_trace(trace_id)
     if not trace:
@@ -86,6 +86,4 @@ async def _peek_async(trace_id: str, *, tui: bool = False) -> None:
 
     total_cost = sum(s.token_cost for s in trace.steps if s.token_cost)
     if total_cost:
-        from recut.providers._pricing import format_cost
-
         console.print(f"[dim]Token cost: {format_cost(total_cost)}[/dim]")
