@@ -108,7 +108,20 @@ Layer 4 sends a batch of ambiguous steps to a language model for judgment. It de
 |---|---|---|
 | `RECUT_L4_BACKEND` | `local` | `local` \| `anthropic` \| `openai` |
 | `RECUT_L4_LOCAL_URL` | `http://localhost:11434/v1` | Base URL for local OpenAI-compatible endpoint (Ollama, LM Studio, llama.cpp, vLLM) |
-| `RECUT_META_MODEL` | model-dependent | Override the model used for Layer 4 judgment |
+| `RECUT_META_MODEL` | model-dependent | Override the model for all backends at once |
+| `RECUT_META_MODEL_ANTHROPIC` | `claude-haiku-4-5-20251001` | Default model when `RECUT_L4_BACKEND=anthropic` |
+| `RECUT_META_MODEL_OPENAI` | `gpt-4o-mini` | Default model when `RECUT_L4_BACKEND=openai` |
+| `RECUT_META_MODEL_LOCAL` | `llama3` | Default model when `RECUT_L4_BACKEND=local` |
+| `RECUT_L4_MAX_TOKENS` | `2000` | Maximum tokens the judge can emit per response |
+| `RECUT_L4_CONTENT_TRUNCATE` | `500` | Characters of step content sent to the judge |
+| `RECUT_L4_REASONING_TRUNCATE` | `300` | Characters of step reasoning sent to the judge |
+| `RECUT_L4_PROMPT_TRUNCATE` | `300` | Characters of the original prompt sent to the judge |
+| `RECUT_L4_EVIDENCE_TRUNCATE` | `200` | Characters of quoted evidence stored per flag |
+| `RECUT_L4_RETRY_ATTEMPTS` | `3` | API call retry attempts before giving up |
+| `RECUT_L4_RATELIMIT_BACKOFF` | `5.0` | Base seconds for rate-limit backoff (`base × attempt`) |
+| `RECUT_L4_CONNECTION_BACKOFF` | `2.0` | Base seconds for connection-error backoff (`base ^ attempt`) |
+
+`RECUT_META_MODEL` overrides per-backend defaults. Per-backend vars (`RECUT_META_MODEL_ANTHROPIC` etc.) let you set different defaults for each backend without locking all three to the same model.
 
 ### Backend defaults
 
@@ -187,10 +200,18 @@ If a model is not in the built-in table and no env var override is set, cost fie
 | Variable | Default | Description |
 |---|---|---|
 | `RECUT_USE_EMBEDDINGS` | `true` | Enable Layer 2 embedding similarity (requires `sentence-transformers`) |
+| `RECUT_EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | Sentence-transformers model used for Layer 2 |
+| `RECUT_EMBEDDING_BATCH_SIZE` | `32` | Batch size for embedding encoding |
 | `RECUT_EMBEDDING_THRESHOLD` | `0.75` | Cosine similarity threshold for Layer 2 drift detection |
+| `RECUT_SCOPE_CREEP_THRESHOLD` | `20` | Step index above which a SCOPE_CREEP flag fires |
+| `RECUT_CONTEXT_WINDOW_SIZE` | `2` | Number of preceding steps used for context in flagging and caching |
 | `RECUT_FLAG_THRESHOLD_LOW` | `0.4` | Minimum score for a LOW-severity flag |
 | `RECUT_FLAG_THRESHOLD_MEDIUM` | `0.65` | Minimum score for a MEDIUM-severity flag |
 | `RECUT_FLAG_THRESHOLD_HIGH` | `0.85` | Minimum score for a HIGH-severity flag |
+| `RECUT_RISK_WEIGHT_LOW` | `0.3` | Risk score assigned to LOW-severity flags |
+| `RECUT_RISK_WEIGHT_MEDIUM` | `0.6` | Risk score assigned to MEDIUM-severity flags |
+| `RECUT_RISK_WEIGHT_HIGH` | `1.0` | Risk score assigned to HIGH-severity flags |
+| `RECUT_FINGERPRINT_HISTORY_LIMIT` | `50` | Historical traces loaded per agent for behavioral fingerprinting |
 
 Scores below `RECUT_FLAG_THRESHOLD_LOW` are silently discarded.
 
@@ -212,7 +233,8 @@ Layer 1–4 results are cached by content hash to avoid re-scoring identical ste
 | Variable | Default | Description |
 |---|---|---|
 | `RECUT_DEFAULT_SAMPLE_RATE` | `1.0` | Global override for `sample_rate` in all `@recut.trace()` decorators |
-| `RECUT_API_TIMEOUT` | `60` | HTTP timeout in seconds for all provider and Layer 4 API calls |
+| `RECUT_API_TIMEOUT` | `60.0` | Read/write HTTP timeout in seconds for all provider and Layer 4 API calls |
+| `RECUT_API_CONNECT_TIMEOUT` | `10.0` | TCP connection timeout in seconds |
 
 Sampling example — trace 10% of production calls:
 
@@ -221,6 +243,21 @@ RECUT_DEFAULT_SAMPLE_RATE=0.1
 ```
 
 ---
+
+## Stress Testing
+
+| Variable | Default | Description |
+|---|---|---|
+| `RECUT_STRESS_VARIANTS` | `3` | Maximum number of injection variants generated per `recut.stress()` call |
+| `RECUT_STRESS_CONCURRENCY` | `3` | Maximum variants running in parallel (semaphore limit) |
+| `RECUT_STRESS_FAILED_THRESHOLD` | `0.8` | `fork_risk` score at or above which a variant is marked `FAILED` |
+| `RECUT_STRESS_DEGRADED_THRESHOLD` | `0.2` | `risk_delta` above which a variant is marked `DEGRADED` (below failed threshold) |
+
+## Replay & Diff
+
+| Variable | Default | Description |
+|---|---|---|
+| `RECUT_DIFF_RISK_DELTA` | `0.1` | Absolute risk delta below which the diff summary reads "little visible effect" |
 
 ## Storage
 
@@ -281,15 +318,39 @@ OPENAI_API_KEY=sk-...
 # Layer 4 — use local Ollama by default, no API cost
 RECUT_L4_BACKEND=local
 RECUT_L4_LOCAL_URL=http://localhost:11434/v1
+# Override the model per backend without locking all backends to one value
+RECUT_META_MODEL_ANTHROPIC=claude-haiku-4-5-20251001
+RECUT_META_MODEL_OPENAI=gpt-4o-mini
+RECUT_META_MODEL_LOCAL=llama3
+# Layer 4 resource limits
+RECUT_L4_MAX_TOKENS=2000
+RECUT_L4_RETRY_ATTEMPTS=3
 
 # Token costs — EUR pricing with discount
 RECUT_PRICE_INPUT=2.10
 RECUT_PRICE_OUTPUT=10.50
 RECUT_COST_UNIT=EUR
 
-# Flagging
+# Flagging tuning
 RECUT_USE_EMBEDDINGS=true
+RECUT_EMBEDDING_MODEL=all-MiniLM-L6-v2
+RECUT_EMBEDDING_BATCH_SIZE=32
 RECUT_FLAG_THRESHOLD_HIGH=0.80
+RECUT_SCOPE_CREEP_THRESHOLD=20
+RECUT_CONTEXT_WINDOW_SIZE=2
+RECUT_RISK_WEIGHT_LOW=0.3
+RECUT_RISK_WEIGHT_MEDIUM=0.6
+RECUT_RISK_WEIGHT_HIGH=1.0
+RECUT_FINGERPRINT_HISTORY_LIMIT=50
+
+# Stress testing
+RECUT_STRESS_VARIANTS=3
+RECUT_STRESS_CONCURRENCY=3
+RECUT_STRESS_FAILED_THRESHOLD=0.8
+RECUT_STRESS_DEGRADED_THRESHOLD=0.2
+
+# Replay diff sensitivity
+RECUT_DIFF_RISK_DELTA=0.1
 
 # Production sampling — trace 20% of calls
 RECUT_DEFAULT_SAMPLE_RATE=0.2
@@ -299,4 +360,5 @@ RECUT_DB_PATH=~/.recut/recut.db
 
 # Timeouts
 RECUT_API_TIMEOUT=30
+RECUT_API_CONNECT_TIMEOUT=10
 ```
