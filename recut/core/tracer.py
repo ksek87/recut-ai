@@ -143,8 +143,8 @@ def trace(
             if random.random() > effective_rate:
                 return await fn(*args, **kwargs)
 
-            _mode = TraceMode(mode) if isinstance(mode, str) else mode
-            _language = TraceLanguage(language) if isinstance(language, str) else language
+            _mode = _coerce_mode(mode)
+            _language = _coerce_language(language)
             _provider = provider or _default_provider()
 
             trace_obj = RecutTrace(
@@ -211,8 +211,8 @@ async def trace_context(
             async for step in provider.run_agent(prompt):
                 ctx.add_step(step)
     """
-    _mode = TraceMode(mode) if isinstance(mode, str) else mode
-    _language = TraceLanguage(language) if isinstance(language, str) else language
+    _mode = _coerce_mode(mode)
+    _language = _coerce_language(language)
     _provider = provider or _default_provider()
 
     trace_obj = RecutTrace(
@@ -232,6 +232,14 @@ async def trace_context(
     finally:
         ctx.finalize()
         asyncio.create_task(_persist_trace(ctx.trace))
+
+
+def _coerce_mode(mode: TraceMode | str) -> TraceMode:
+    return TraceMode(mode) if isinstance(mode, str) else mode
+
+
+def _coerce_language(language: TraceLanguage | str) -> TraceLanguage:
+    return TraceLanguage(language) if isinstance(language, str) else language
 
 
 def _extract_prompt(args: tuple, kwargs: dict) -> str:

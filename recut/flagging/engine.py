@@ -29,6 +29,7 @@ from recut.schema.trace import (
 )
 from recut.storage.db import StorageClient
 from recut.storage.models import FlagCache
+from recut.utils import parse_float_env, parse_int_env
 
 _log = logging.getLogger(__name__)
 
@@ -276,11 +277,40 @@ def _layer3_native_mismatch(step: RecutStep) -> RecutFlag | None:
 
 
 def _get_embedding_threshold() -> float:
-    try:
-        return float(os.environ.get("RECUT_EMBEDDING_THRESHOLD", "0.75"))
-    except (ValueError, TypeError):
-        _log.warning("recut: invalid RECUT_EMBEDDING_THRESHOLD; using 0.75")
-        return 0.75
+    return parse_float_env("RECUT_EMBEDDING_THRESHOLD", 0.75)
+
+
+def _cosine_sim(a: Any, b: Any, np: Any) -> float:
+    return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-10))
+
+
+def _goal_drift_flag(step_id: str, similarity: float) -> RecutFlag:
+    return RecutFlag(
+        type=FlagType.GOAL_DRIFT,
+        severity=Severity.MEDIUM,
+        plain_reason=(
+            "The agent's response seems to have drifted away from the original task. "
+            f"Similarity to the original goal: {similarity:.0%}."
+        ),
+        step_id=step_id,
+        source=FlagSource.EMBEDDING,
+    )
+
+
+_RA_MISMATCH_REASON = (
+    "The agent's reasoning and its actual action don't seem closely related. "
+    "It may have reasoned about one thing and done another."
+)
+
+
+def _ra_mismatch_flag(step_id: str) -> RecutFlag:
+    return RecutFlag(
+        type=FlagType.REASONING_ACTION_MISMATCH,
+        severity=Severity.MEDIUM,
+        plain_reason=_RA_MISMATCH_REASON,
+        step_id=step_id,
+        source=FlagSource.EMBEDDING,
+    )
 
 
 async def _layer2_embeddings(
@@ -298,52 +328,18 @@ async def _layer2_embeddings(
         return []
 
     threshold = _get_embedding_threshold()
-
     try:
         model = _get_embedding_model()
         flags: list[RecutFlag] = []
-
         prompt_emb = model.encode(original_prompt)
         step_emb = model.encode(step.content)
-        similarity = float(
-            np.dot(prompt_emb, step_emb)
-            / (np.linalg.norm(prompt_emb) * np.linalg.norm(step_emb) + 1e-10)
-        )
-
-        if similarity < (1.0 - threshold):
-            flags.append(
-                RecutFlag(
-                    type=FlagType.GOAL_DRIFT,
-                    severity=Severity.MEDIUM,
-                    plain_reason=(
-                        "The agent's response seems to have drifted away from the original task. "
-                        f"Similarity to the original goal: {similarity:.0%}."
-                    ),
-                    step_id=step.id,
-                    source=FlagSource.EMBEDDING,
-                )
-            )
-
+        sim = _cosine_sim(prompt_emb, step_emb, np)
+        if sim < (1.0 - threshold):
+            flags.append(_goal_drift_flag(step.id, sim))
         if step.reasoning and step.reasoning.content:
-            reasoning_emb = model.encode(step.reasoning.content)
-            ra_similarity = float(
-                np.dot(reasoning_emb, step_emb)
-                / (np.linalg.norm(reasoning_emb) * np.linalg.norm(step_emb) + 1e-10)
-            )
-            if ra_similarity < (1.0 - threshold):
-                flags.append(
-                    RecutFlag(
-                        type=FlagType.REASONING_ACTION_MISMATCH,
-                        severity=Severity.MEDIUM,
-                        plain_reason=(
-                            "The agent's reasoning and its actual action don't seem closely related. "
-                            "It may have reasoned about one thing and done another."
-                        ),
-                        step_id=step.id,
-                        source=FlagSource.EMBEDDING,
-                    )
-                )
-
+            r_emb = model.encode(step.reasoning.content)
+            if _cosine_sim(r_emb, step_emb, np) < (1.0 - threshold):
+                flags.append(_ra_mismatch_flag(step.id))
         return flags
     except Exception:
         return []
@@ -380,15 +376,12 @@ async def _layer2_embeddings_batch(
         return {}
 
     threshold = _get_embedding_threshold()
-
     try:
         model = _get_embedding_model()
-        contents = [s.content for s in steps]
         reasoning_contents = [
             s.reasoning.content if s.reasoning and s.reasoning.content else "" for s in steps
         ]
-
-        all_texts = [original_prompt] + contents + reasoning_contents
+        all_texts = [original_prompt] + [s.content for s in steps] + reasoning_contents
         all_embs = model.encode(all_texts, batch_size=32, show_progress_bar=False)
 
         prompt_emb = all_embs[0]
@@ -399,39 +392,13 @@ async def _layer2_embeddings_batch(
         for i, step in enumerate(steps):
             flags: list[RecutFlag] = []
             step_emb = step_embs[i]
-            norm_p = np.linalg.norm(prompt_emb) * np.linalg.norm(step_emb) + 1e-10
-            similarity = float(np.dot(prompt_emb, step_emb) / norm_p)
-            if similarity < (1.0 - threshold):
-                flags.append(
-                    RecutFlag(
-                        type=FlagType.GOAL_DRIFT,
-                        severity=Severity.MEDIUM,
-                        plain_reason=(
-                            "The agent's response seems to have drifted away from the original task. "
-                            f"Similarity to the original goal: {similarity:.0%}."
-                        ),
-                        step_id=step.id,
-                        source=FlagSource.EMBEDDING,
-                    )
-                )
-            r_content = reasoning_contents[i]
-            if r_content:
-                r_emb = reasoning_embs[i]
-                norm_ra = np.linalg.norm(r_emb) * np.linalg.norm(step_emb) + 1e-10
-                ra_sim = float(np.dot(r_emb, step_emb) / norm_ra)
-                if ra_sim < (1.0 - threshold):
-                    flags.append(
-                        RecutFlag(
-                            type=FlagType.REASONING_ACTION_MISMATCH,
-                            severity=Severity.MEDIUM,
-                            plain_reason=(
-                                "The agent's reasoning and its actual action don't seem closely related. "
-                                "It may have reasoned about one thing and done another."
-                            ),
-                            step_id=step.id,
-                            source=FlagSource.EMBEDDING,
-                        )
-                    )
+            sim = _cosine_sim(prompt_emb, step_emb, np)
+            if sim < (1.0 - threshold):
+                flags.append(_goal_drift_flag(step.id, sim))
+            if reasoning_contents[i] and _cosine_sim(reasoning_embs[i], step_emb, np) < (
+                1.0 - threshold
+            ):
+                flags.append(_ra_mismatch_flag(step.id))
             if flags:
                 results[step.id] = flags
         return results
@@ -460,12 +427,7 @@ def _get_l4_client(backend: str) -> Any:
     if backend not in _l4_clients:
         import httpx
 
-        try:
-            _timeout_secs = float(os.environ.get("RECUT_API_TIMEOUT", "30"))
-        except (ValueError, TypeError):
-            _log.warning("recut: invalid RECUT_API_TIMEOUT; using 30s")
-            _timeout_secs = 30.0
-        timeout = httpx.Timeout(_timeout_secs)
+        timeout = httpx.Timeout(parse_float_env("RECUT_API_TIMEOUT", 30.0))
         if backend == "anthropic":
             _l4_clients[backend] = anthropic.AsyncAnthropic(timeout=timeout)
         else:
@@ -689,11 +651,7 @@ async def _cache_flags(content_hash: str, flags: list[RecutFlag]) -> None:
     if os.environ.get("RECUT_CACHE_ENABLED", "true").lower() != "true":
         return
 
-    try:
-        ttl = max(1, int(os.environ.get("RECUT_CACHE_TTL", "3600")))
-    except (ValueError, TypeError):
-        _log.warning("recut: invalid RECUT_CACHE_TTL; using 3600s")
-        ttl = 3600
+    ttl = parse_int_env("RECUT_CACHE_TTL", 3600, minimum=1)
     expires_at = datetime.now(UTC) + timedelta(seconds=ttl)
 
     # Populate L1 cache immediately (no I/O)

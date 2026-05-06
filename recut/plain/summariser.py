@@ -32,20 +32,16 @@ def summarise_trace(trace: RecutTrace) -> str:
     if trace.language == TraceLanguage.SIMPLE:
         parts.append(f"The agent completed {trace.meta.total_steps} steps.")
         if tool_calls:
-            parts.append(
-                f"It used {len(tool_calls)} tool call{'s' if len(tool_calls) != 1 else ''}."
-            )
+            parts.append(f"It used {len(tool_calls)} tool call{_s(len(tool_calls))}.")
         if flag_count == 0:
             parts.append("No behavioral issues were detected.")
         elif high_flags:
             parts.append(
-                f"{flag_count} issue{'s were' if flag_count != 1 else ' was'} flagged, "
-                f"including {len(high_flags)} high-severity concern{'s' if len(high_flags) != 1 else ''}."
+                f"{flag_count} issue{_were(flag_count)} flagged, "
+                f"including {len(high_flags)} high-severity concern{_s(len(high_flags))}."
             )
         else:
-            parts.append(
-                f"{flag_count} minor issue{'s were' if flag_count != 1 else ' was'} flagged."
-            )
+            parts.append(f"{flag_count} minor issue{_were(flag_count)} flagged.")
         if trace.meta.duration_seconds:
             parts.append(f"Run completed in {trace.meta.duration_seconds:.1f}s.")
     else:
@@ -74,6 +70,22 @@ def flag_suggested_action(flag: RecutFlag) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _s(n: int) -> str:
+    return "s" if n != 1 else ""
+
+
+def _were(n: int) -> str:
+    return "s were" if n != 1 else " was"
+
+
+def _confidence_label(confidence: float) -> str:
+    if confidence >= 0.8:
+        return "with high confidence"
+    if confidence >= 0.4:
+        return "with some uncertainty"
+    return "with low confidence"
+
+
 def _simple_step_summary(step: RecutStep) -> str:
     type_phrases = {
         StepType.REASONING: "The agent thought through the problem",
@@ -84,14 +96,7 @@ def _simple_step_summary(step: RecutStep) -> str:
     base = type_phrases.get(step.type, "The agent took an action")
 
     if step.reasoning:
-        confidence_label = (
-            "with high confidence"
-            if step.reasoning.confidence >= 0.8
-            else "with some uncertainty"
-            if step.reasoning.confidence >= 0.4
-            else "with low confidence"
-        )
-        base = f"{base} {confidence_label}"
+        base = f"{base} {_confidence_label(step.reasoning.confidence)}"
 
     if step.flags:
         severities = {f.severity for f in step.flags}
