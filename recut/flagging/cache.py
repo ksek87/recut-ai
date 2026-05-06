@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 from recut.schema.trace import RecutFlag, RecutStep
 from recut.storage.db import StorageClient
 from recut.storage.models import FlagCache
-from recut.utils import parse_int_env
+from recut.utils import get_context_window, parse_int_env
 
 _log = logging.getLogger(__name__)
 
@@ -21,7 +21,8 @@ _mem_cache: dict[str, tuple[list[RecutFlag], datetime]] = {}
 
 
 def _cache_key(step: RecutStep, preceding: list[RecutStep]) -> str:
-    context = step.content + "".join(p.content for p in preceding[-2:])
+    window = get_context_window()
+    context = step.content + "".join(p.content for p in preceding[-window:])
     return hashlib.sha256(context.encode()).hexdigest()
 
 

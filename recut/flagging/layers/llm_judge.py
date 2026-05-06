@@ -15,17 +15,24 @@ from recut.flagging.flags import Thresholds
 from recut.flagging.prompts import BATCH_FLAGGING_PROMPT, FLAGGING_SYSTEM_PROMPT
 from recut.providers._utils import get_api_timeout
 from recut.schema.trace import FlagSource, FlagType, RecutFlag, RecutStep, Severity
+from recut.utils import parse_float_env, parse_int_env
 
 _log = logging.getLogger(__name__)
 
 _L4_VALID_BACKENDS = frozenset({"local", "anthropic", "openai"})
 _l4_clients: dict[str, Any] = {}
 
-_DEFAULT_MODELS = {
+_BUILTIN_DEFAULT_MODELS = {
     "anthropic": "claude-haiku-4-5-20251001",
     "openai": "gpt-4o-mini",
     "local": "llama3",
 }
+
+
+def _default_model(backend: str) -> str:
+    """Return the default model for the given backend, respecting per-backend env overrides."""
+    env_key = f"RECUT_META_MODEL_{backend.upper()}"
+    return os.environ.get(env_key, _BUILTIN_DEFAULT_MODELS[backend])
 
 
 def _get_l4_client(backend: str) -> Any:
@@ -50,10 +57,11 @@ def _get_l4_client(backend: str) -> Any:
 async def _call_l4_api(backend: str, system: str, user_prompt: str, meta_model: str) -> str:
     """Dispatch to the configured L4 backend. Returns raw text or raises."""
     client = _get_l4_client(backend)
+    max_tokens = parse_int_env("RECUT_L4_MAX_TOKENS", 2000, minimum=1)
     if backend == "anthropic":
         response = await client.messages.create(
             model=meta_model,
-            max_tokens=2000,
+            max_tokens=max_tokens,
             system=system,
             messages=[{"role": "user", "content": user_prompt}],
         )
@@ -64,7 +72,7 @@ async def _call_l4_api(backend: str, system: str, user_prompt: str, meta_model: 
     else:
         response = await client.chat.completions.create(
             model=meta_model,
-            max_tokens=2000,
+            max_tokens=max_tokens,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user_prompt},
@@ -82,7 +90,11 @@ async def _layer4_llm_judge(steps: list[RecutStep], original_prompt: str) -> lis
         _log.warning("recut: Unknown RECUT_L4_BACKEND=%r, defaulting to local", backend)
         backend = "local"
 
-    meta_model = os.environ.get("RECUT_META_MODEL", _DEFAULT_MODELS[backend])
+    meta_model = os.environ.get("RECUT_META_MODEL") or _default_model(backend)
+
+    content_truncate = parse_int_env("RECUT_L4_CONTENT_TRUNCATE", 500, minimum=1)
+    reasoning_truncate = parse_int_env("RECUT_L4_REASONING_TRUNCATE", 300, minimum=1)
+    prompt_truncate = parse_int_env("RECUT_L4_PROMPT_TRUNCATE", 300, minimum=1)
 
     steps_payload = json.dumps(
         [
@@ -90,8 +102,8 @@ async def _layer4_llm_judge(steps: list[RecutStep], original_prompt: str) -> lis
                 "step_id": s.id,
                 "index": s.index,
                 "type": s.type.value,
-                "content": s.content[:500],
-                "reasoning": s.reasoning.content[:300] if s.reasoning else None,
+                "content": s.content[:content_truncate],
+                "reasoning": s.reasoning.content[:reasoning_truncate] if s.reasoning else None,
             }
             for s in steps
         ],
@@ -99,12 +111,16 @@ async def _layer4_llm_judge(steps: list[RecutStep], original_prompt: str) -> lis
     )
 
     prompt = BATCH_FLAGGING_PROMPT.format(
-        prompt=original_prompt[:300],
+        prompt=original_prompt[:prompt_truncate],
         steps_json=steps_payload,
     )
 
+    retry_attempts = parse_int_env("RECUT_L4_RETRY_ATTEMPTS", 3, minimum=1)
+    ratelimit_backoff = parse_float_env("RECUT_L4_RATELIMIT_BACKOFF", 5.0)
+    connection_backoff = parse_float_env("RECUT_L4_CONNECTION_BACKOFF", 2.0)
+
     raw = ""
-    for attempt in range(3):
+    for attempt in range(retry_attempts):
         try:
             raw = await _call_l4_api(backend, FLAGGING_SYSTEM_PROMPT, prompt, meta_model)
             return _parse_llm_flags(raw, steps)
@@ -112,19 +128,23 @@ async def _layer4_llm_judge(steps: list[RecutStep], original_prompt: str) -> lis
             _log.warning("recut: Layer 4 auth error (backend=%r): %s", backend, exc)
             return []
         except (anthropic.RateLimitError, openai.RateLimitError):
-            if attempt < 2:
-                await asyncio.sleep(5 * (attempt + 1))
+            if attempt < retry_attempts - 1:
+                await asyncio.sleep(ratelimit_backoff * (attempt + 1))
             else:
-                _log.warning("recut: Layer 4 rate-limited after 3 attempts, skipping")
+                _log.warning(
+                    "recut: Layer 4 rate-limited after %d attempts, skipping", retry_attempts
+                )
                 return []
         except (anthropic.APIConnectionError, openai.APIConnectionError):
             if backend == "local":
                 _log.debug("recut: L4 local backend unreachable, skipping")
                 return []
-            if attempt < 2:
-                await asyncio.sleep(2**attempt)
+            if attempt < retry_attempts - 1:
+                await asyncio.sleep(connection_backoff**attempt)
             else:
-                _log.warning("recut: Layer 4 connection error after 3 attempts, skipping")
+                _log.warning(
+                    "recut: Layer 4 connection error after %d attempts, skipping", retry_attempts
+                )
                 return []
         except json.JSONDecodeError as exc:
             _log.warning("recut: Layer 4 returned non-JSON (%.80s…): %s", raw, exc)
@@ -149,6 +169,7 @@ def _parse_llm_flags(raw: str, steps: list[RecutStep]) -> list[RecutFlag]:
 
     flags: list[RecutFlag] = []
     thresholds = Thresholds()
+    evidence_truncate = parse_int_env("RECUT_L4_EVIDENCE_TRUNCATE", 200, minimum=1)
 
     for result in results:
         if not isinstance(result, dict):
@@ -186,7 +207,7 @@ def _parse_llm_flags(raw: str, steps: list[RecutStep]) -> list[RecutFlag]:
             )
             evidence = entry.get("evidence") or None
             if isinstance(evidence, str):
-                evidence = evidence[:200].strip() or None
+                evidence = evidence[:evidence_truncate].strip() or None
 
             flags.append(
                 RecutFlag(

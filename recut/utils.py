@@ -25,3 +25,8 @@ def parse_int_env(key: str, default: int, minimum: int | None = None) -> int:
         _log.warning("recut: invalid %s env var; using %d", key, default)
         value = default
     return max(minimum, value) if minimum is not None else value
+
+
+def get_context_window() -> int:
+    """Return the number of preceding steps used for context in flagging/caching."""
+    return parse_int_env("RECUT_CONTEXT_WINDOW_SIZE", 2, minimum=1)

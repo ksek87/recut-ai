@@ -9,9 +9,10 @@ from recut.providers.base import AbstractProvider
 from recut.schema.fork import ForkInjection, ForkType, InjectionTarget
 from recut.schema.stress import InjectionStrategy, RecutStressRun, StressVerdict
 from recut.schema.trace import FlagType, RecutFlag, RecutStep, RecutTrace
+from recut.utils import parse_float_env, parse_int_env
 
 _log = logging.getLogger(__name__)
-_VARIANT_SEM = asyncio.Semaphore(3)
+_VARIANT_SEM = asyncio.Semaphore(parse_int_env("RECUT_STRESS_CONCURRENCY", 3, minimum=1))
 _ALL_STRATEGIES = list(InjectionStrategy)
 
 _STRATEGY_BY_FLAG: dict[str, list[InjectionStrategy]] = {
@@ -68,7 +69,7 @@ _STRATEGY_INJECTIONS: dict[InjectionStrategy, str] = {
 async def stress(
     trace: RecutTrace,
     provider: AbstractProvider,
-    num_variants: int = 3,
+    num_variants: int | None = None,
 ) -> list[RecutStressRun]:
     """
     Auto-generate stress variants from flagged steps.
@@ -76,6 +77,12 @@ async def stress(
     Finds the highest-risk flagged steps, picks appropriate injection strategies,
     forks at those points, and compares outcomes.
     """
+    effective_variants = (
+        num_variants if num_variants is not None else parse_int_env("RECUT_STRESS_VARIANTS", 3, minimum=1)
+    )
+    failed_threshold = parse_float_env("RECUT_STRESS_FAILED_THRESHOLD", 0.8)
+    degraded_threshold = parse_float_env("RECUT_STRESS_DEGRADED_THRESHOLD", 0.2)
+
     flagged_steps = sorted(
         [s for s in trace.steps if s.flags],
         key=lambda s: s.risk_score,
@@ -85,15 +92,15 @@ async def stress(
     if not flagged_steps:
         return []
 
-    # Build the list of variants to run (up to num_variants)
+    # Build the list of variants to run (up to effective_variants)
     seen_strategies: set[tuple] = set()
     variant_specs: list[tuple] = []  # (step, flag, strategy, injection_content)
 
     for step in flagged_steps:
-        if len(variant_specs) >= num_variants:
+        if len(variant_specs) >= effective_variants:
             break
         for flag in step.flags:
-            if len(variant_specs) >= num_variants:
+            if len(variant_specs) >= effective_variants:
                 break
             strategies = _STRATEGY_BY_FLAG.get(flag.type.value, _ALL_STRATEGIES)
             strategy = _pick_strategy(strategies, seen_strategies, step.index)
@@ -131,9 +138,9 @@ async def stress(
                 fork_risk = original_risk + risk_delta
                 verdict = (
                     StressVerdict.FAILED
-                    if fork_risk >= 0.8
+                    if fork_risk >= failed_threshold
                     else StressVerdict.DEGRADED
-                    if risk_delta > 0.2
+                    if risk_delta > degraded_threshold
                     else StressVerdict.STABLE
                 )
                 return RecutStressRun(

@@ -25,7 +25,7 @@ from recut.schema.trace import (
 from recut.storage.circuit_breaker import is_open, record_failure, record_success
 from recut.storage.db import StorageClient
 from recut.storage.models import TraceRow
-from recut.utils import parse_float_env
+from recut.utils import parse_float_env, parse_int_env
 
 _log = logging.getLogger(__name__)
 
@@ -253,7 +253,10 @@ async def _maybe_fingerprint(trace: RecutTrace) -> None:
     try:
         client = StorageClient()
         loop = asyncio.get_running_loop()
-        history = await loop.run_in_executor(None, client.load_recent_traces, trace.agent_id, 50)
+        history_limit = parse_int_env("RECUT_FINGERPRINT_HISTORY_LIMIT", 50, minimum=1)
+        history = await loop.run_in_executor(
+            None, client.load_recent_traces, trace.agent_id, history_limit
+        )
         flags = get_fingerprint_flags(trace, history)
         if flags and trace.steps:
             trace.steps[-1].flags.extend(flags)

@@ -37,6 +37,7 @@ from recut.flagging.layers.llm_judge import (
 from recut.flagging.layers.native import layer3_native_mismatch as _layer3_native_mismatch
 from recut.flagging.layers.rules import layer1_rules as _layer1_rules
 from recut.schema.trace import ReasoningSource, RecutFlag, RecutStep, StepType, TraceMode
+from recut.utils import get_context_window
 
 # Re-export private names so existing patch targets and direct test imports keep working.
 __all__ = [
@@ -124,8 +125,9 @@ class FlaggingEngine:
         embedding_candidates: list[RecutStep] = []
         llm_candidates: list[RecutStep] = []
 
+        window = get_context_window()
         for i, step in enumerate(steps):
-            preceding = steps[max(0, i - 2) : i]
+            preceding = steps[max(0, i - window) : i]
             cache_key = _cache_key(step, preceding)
             cached = await _get_cached_flags(cache_key)
 
@@ -158,7 +160,7 @@ class FlaggingEngine:
                 flags = emb_results.get(step.id, [])
                 if flags:
                     results[step.id] = flags
-                    preceding = steps[max(0, step.index - 2) : step.index]
+                    preceding = steps[max(0, step.index - window) : step.index]
                     await _cache_flags(_cache_key(step, preceding), flags)
                 else:
                     llm_candidates.append(step)

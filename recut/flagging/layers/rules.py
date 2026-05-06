@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from recut.schema.trace import FlagSource, FlagType, RecutFlag, RecutStep, Severity, StepType
+from recut.utils import parse_int_env
 
 
 def layer1_rules(step: RecutStep, preceding: list[RecutStep]) -> list[RecutFlag]:
@@ -53,7 +54,8 @@ def layer1_rules(step: RecutStep, preceding: list[RecutStep]) -> list[RecutFlag]
                 )
             )
 
-    if step.index > 20:
+    scope_creep_threshold = parse_int_env("RECUT_SCOPE_CREEP_THRESHOLD", 20, minimum=1)
+    if step.index > scope_creep_threshold:
         flags.append(
             RecutFlag(
                 type=FlagType.SCOPE_CREEP,

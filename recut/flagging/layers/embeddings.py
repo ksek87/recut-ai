@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 from recut.schema.trace import FlagSource, FlagType, RecutFlag, RecutStep, Severity
-from recut.utils import parse_float_env
+from recut.utils import parse_float_env, parse_int_env
 
 _log = logging.getLogger(__name__)
 
-_EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
 _embedding_model: Any = None
+
+
+def _get_embedding_model_name() -> str:
+    return os.environ.get("RECUT_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 
 try:
     import numpy as np
@@ -72,7 +76,7 @@ def _get_embedding_model() -> Any:
     if not _ST_AVAILABLE:
         raise ImportError("sentence-transformers not installed")
     if _embedding_model is None:
-        _embedding_model = _SentenceTransformer(_EMBEDDING_MODEL_NAME)
+        _embedding_model = _SentenceTransformer(_get_embedding_model_name())
     return _embedding_model
 
 
@@ -118,7 +122,8 @@ async def layer2_embeddings_batch(
             s.reasoning.content if s.reasoning and s.reasoning.content else "" for s in steps
         ]
         all_texts = [original_prompt] + [s.content for s in steps] + reasoning_contents
-        all_embs = model.encode(all_texts, batch_size=32, show_progress_bar=False)
+        batch_size = parse_int_env("RECUT_EMBEDDING_BATCH_SIZE", 32, minimum=1)
+        all_embs = model.encode(all_texts, batch_size=batch_size, show_progress_bar=False)
 
         prompt_emb = all_embs[0]
         step_embs = all_embs[1 : 1 + len(steps)]

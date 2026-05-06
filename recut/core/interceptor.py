@@ -10,6 +10,7 @@ from recut.hooks import fire_all as _fire_global
 from recut.plain.summariser import flag_suggested_action, summarise_step
 from recut.schema.hooks import FlagHandler, RecutFlagEvent
 from recut.schema.trace import RecutFlag, RecutStep, RecutTrace, TraceMode
+from recut.utils import get_context_window
 
 _log = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ class InterceptSession:
 
     async def process_step(self, step: RecutStep) -> RecutStep:
         """Score a step and fire handlers, optionally pausing the session."""
-        preceding = self.trace.steps[-2:] if self.trace.steps else []
+        preceding = self.trace.steps[-get_context_window() :] if self.trace.steps else []
         flags = await self._engine.score_step(step, preceding, self.trace.prompt)
 
         step.flags = flags
