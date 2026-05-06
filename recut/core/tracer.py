@@ -4,7 +4,6 @@ import asyncio
 import functools
 import json
 import logging
-import os
 import random
 import time
 from collections.abc import AsyncIterator, Callable
@@ -26,6 +25,7 @@ from recut.schema.trace import (
 from recut.storage.circuit_breaker import is_open, record_failure, record_success
 from recut.storage.db import StorageClient
 from recut.storage.models import TraceRow
+from recut.utils import parse_float_env
 
 _log = logging.getLogger(__name__)
 
@@ -132,14 +132,7 @@ def trace(
         @functools.wraps(fn)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
             # Selective tracing — honour sample_rate
-            try:
-                effective_rate = float(os.environ.get("RECUT_DEFAULT_SAMPLE_RATE", sample_rate))
-            except (ValueError, TypeError):
-                _log.warning(
-                    "recut: invalid RECUT_DEFAULT_SAMPLE_RATE env var; using default %s",
-                    sample_rate,
-                )
-                effective_rate = float(sample_rate)
+            effective_rate = parse_float_env("RECUT_DEFAULT_SAMPLE_RATE", float(sample_rate))
             if random.random() > effective_rate:
                 return await fn(*args, **kwargs)
 

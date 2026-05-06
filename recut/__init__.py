@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from recut import hooks as _hooks
 from recut.core.auditor import audit, peek
 from recut.core.interceptor import InterceptSession, intercept
 from recut.core.replayer import diff, replay
@@ -47,7 +48,6 @@ def on_flag(
         @recut.on_flag(severity="high", flag_type="overconfidence")
         async def handle_high(event): ...
     """
-    from recut import hooks as _hooks
 
     def decorator(func: Callable) -> Callable:
         _hooks.register(func, severity=severity, flag_type=flag_type)
@@ -60,8 +60,6 @@ def on_flag(
 
 def get_flag_handlers() -> list[Callable]:
     """Return all registered global flag handler callables."""
-    from recut import hooks as _hooks
-
     return [h for h, _ in _hooks.get_all()]
 
 

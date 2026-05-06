@@ -163,7 +163,7 @@ class TestByomCallDispatch:
         mock_client = AsyncMock()
         mock_client.messages.create = AsyncMock(return_value=mock_response)
 
-        with patch("recut.flagging.engine._get_l4_client", return_value=mock_client):
+        with patch("recut.flagging.layers.llm_judge._get_l4_client", return_value=mock_client):
             result = await _call_l4_api("anthropic", "system", "user prompt", "claude-haiku")
 
         mock_client.messages.create.assert_called_once()
@@ -178,7 +178,7 @@ class TestByomCallDispatch:
         mock_client = AsyncMock()
         mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
-        with patch("recut.flagging.engine._get_l4_client", return_value=mock_client):
+        with patch("recut.flagging.layers.llm_judge._get_l4_client", return_value=mock_client):
             result = await _call_l4_api("local", "system", "user prompt", "llama3")
 
         mock_client.chat.completions.create.assert_called_once()
@@ -190,7 +190,7 @@ class TestByomCallDispatch:
         mock_client = AsyncMock()
         mock_client.messages.create = AsyncMock(return_value=mock_response)
 
-        with patch("recut.flagging.engine._get_l4_client", return_value=mock_client):
+        with patch("recut.flagging.layers.llm_judge._get_l4_client", return_value=mock_client):
             result = await _call_l4_api("anthropic", "system", "prompt", "model")
 
         assert result == ""
@@ -201,7 +201,7 @@ class TestByomCallDispatch:
         mock_client = AsyncMock()
         mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
-        with patch("recut.flagging.engine._get_l4_client", return_value=mock_client):
+        with patch("recut.flagging.layers.llm_judge._get_l4_client", return_value=mock_client):
             result = await _call_l4_api("local", "system", "prompt", "model")
 
         assert result == ""
@@ -214,9 +214,11 @@ class TestByomLlmJudge:
         monkeypatch.setenv("RECUT_L4_BACKEND", "bogus-backend")
         step = _make_step(0)
 
-        with patch("recut.flagging.engine._call_l4_api", new_callable=AsyncMock) as mock_call:
+        with patch(
+            "recut.flagging.layers.llm_judge._call_l4_api", new_callable=AsyncMock
+        ) as mock_call:
             mock_call.return_value = "[]"
-            with caplog.at_level(logging.WARNING, logger="recut.flagging.engine"):
+            with caplog.at_level(logging.WARNING, logger="recut.flagging.layers.llm_judge"):
                 await _layer4_llm_judge([step], "test prompt")
 
         assert "bogus-backend" in caplog.text
@@ -228,7 +230,9 @@ class TestByomLlmJudge:
         monkeypatch.delenv("RECUT_META_MODEL", raising=False)
         step = _make_step(0)
 
-        with patch("recut.flagging.engine._call_l4_api", new_callable=AsyncMock) as mock_call:
+        with patch(
+            "recut.flagging.layers.llm_judge._call_l4_api", new_callable=AsyncMock
+        ) as mock_call:
             mock_call.return_value = "[]"
             await _layer4_llm_judge([step], "prompt")
 
@@ -240,7 +244,9 @@ class TestByomLlmJudge:
         monkeypatch.setenv("RECUT_META_MODEL", "gpt-4o")
         step = _make_step(0)
 
-        with patch("recut.flagging.engine._call_l4_api", new_callable=AsyncMock) as mock_call:
+        with patch(
+            "recut.flagging.layers.llm_judge._call_l4_api", new_callable=AsyncMock
+        ) as mock_call:
             mock_call.return_value = "[]"
             await _layer4_llm_judge([step], "prompt")
 
@@ -257,10 +263,10 @@ class TestByomLlmJudge:
 
         with (
             patch(
-                "recut.flagging.engine._call_l4_api",
+                "recut.flagging.layers.llm_judge._call_l4_api",
                 side_effect=openai.APIConnectionError(request=MagicMock()),
             ),
-            caplog.at_level(logging.DEBUG, logger="recut.flagging.engine"),
+            caplog.at_level(logging.DEBUG, logger="recut.flagging.layers.llm_judge"),
         ):
             result = await _layer4_llm_judge([step], "prompt")
 
@@ -277,7 +283,7 @@ class TestByomLlmJudge:
 
         with (
             patch(
-                "recut.flagging.engine._call_l4_api",
+                "recut.flagging.layers.llm_judge._call_l4_api",
                 side_effect=anthropic.RateLimitError(
                     message="rate limited",
                     response=MagicMock(status_code=429),
@@ -285,7 +291,7 @@ class TestByomLlmJudge:
                 ),
             ),
             patch("asyncio.sleep", new_callable=AsyncMock),
-            caplog.at_level(logging.WARNING, logger="recut.flagging.engine"),
+            caplog.at_level(logging.WARNING, logger="recut.flagging.layers.llm_judge"),
         ):
             result = await _layer4_llm_judge([step], "prompt")
 
@@ -302,14 +308,14 @@ class TestByomLlmJudge:
 
         with (
             patch(
-                "recut.flagging.engine._call_l4_api",
+                "recut.flagging.layers.llm_judge._call_l4_api",
                 side_effect=anthropic.AuthenticationError(
                     message="auth error",
                     response=MagicMock(status_code=401),
                     body={},
                 ),
             ),
-            caplog.at_level(logging.WARNING, logger="recut.flagging.engine"),
+            caplog.at_level(logging.WARNING, logger="recut.flagging.layers.llm_judge"),
         ):
             result = await _layer4_llm_judge([step], "prompt")
 

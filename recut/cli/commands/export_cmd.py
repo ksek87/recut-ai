@@ -5,6 +5,9 @@ import asyncio
 import typer
 from rich.console import Console
 
+from recut.export.exporter import export
+from recut.storage.db import StorageClient
+
 app = typer.Typer(help="Export a trace to .recut.json.")
 console = Console()
 
@@ -19,9 +22,6 @@ def export_cmd(
 
 
 async def _export_async(trace_id: str, output: str | None) -> None:
-    from recut.export.exporter import export
-    from recut.storage.db import StorageClient
-
     client = StorageClient()
     trace = client.load_trace(trace_id)
     if not trace:

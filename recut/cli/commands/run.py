@@ -6,6 +6,12 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
+from recut.core.auditor import audit, peek
+from recut.core.tracer import trace_context
+from recut.plain.summariser import summarise_step
+from recut.providers.anthropic import AnthropicProvider
+from recut.schema.trace import TraceMode
+
 app = typer.Typer(help="Run an agent with tracing.", invoke_without_command=True)
 console = Console()
 
@@ -23,12 +29,6 @@ def run(
 
 
 async def _run_async(prompt: str, agent_id: str, mode: str, language: str, model: str) -> None:
-    from recut.core.auditor import audit, peek
-    from recut.core.tracer import trace_context
-    from recut.plain.summariser import summarise_step
-    from recut.providers.anthropic import AnthropicProvider
-    from recut.schema.trace import TraceMode
-
     provider = AnthropicProvider(model=model)
 
     try:
