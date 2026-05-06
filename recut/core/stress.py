@@ -78,7 +78,9 @@ async def stress(
     forks at those points, and compares outcomes.
     """
     effective_variants = (
-        num_variants if num_variants is not None else parse_int_env("RECUT_STRESS_VARIANTS", 3, minimum=1)
+        num_variants
+        if num_variants is not None
+        else parse_int_env("RECUT_STRESS_VARIANTS", 3, minimum=1)
     )
     failed_threshold = parse_float_env("RECUT_STRESS_FAILED_THRESHOLD", 0.8)
     degraded_threshold = parse_float_env("RECUT_STRESS_DEGRADED_THRESHOLD", 0.2)

@@ -17,6 +17,7 @@ _embedding_model: Any = None
 def _get_embedding_model_name() -> str:
     return os.environ.get("RECUT_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 
+
 try:
     import numpy as np
 
