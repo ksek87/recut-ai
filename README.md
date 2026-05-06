@@ -78,38 +78,42 @@ Every flag ships with a plain-language reason — readable by anyone on the team
 | `anomalous_tool_use` | Tool use is unexpected, repeated, or unjustified |
 | `reasoning_action_mismatch` | *(Claude only)* Private reasoning expresses doubt; action expresses confidence |
 
-Every flag shows which layer fired it — `[rule]`, `[embedding]`, `[native]`, or `[judge]` — so you always know whether a signal is deterministic or model-generated.
+Every flag shows which layer fired it — `[rule]`, `[embedding]`, `[native]`, `[judge]`, or `[fingerprint]` — so you always know whether a signal is deterministic or model-generated.
 
 ---
 
 ## Flagging Engine
 
-Detection runs in four layers, cheapest first:
+Detection runs in layers, cheapest first:
 
 1. **Rule-based** — free, instant, deterministic
 2. **Embedding similarity** — cosine distance from original prompt (optional, `sentence-transformers`)
 3. **Native thinking analysis** — Claude-only; reads extended thinking blocks directly
-4. **LLM judge** — defaults to a local model via any OpenAI-compatible runtime (Ollama, LM Studio, Jan, llama.cpp, vLLM — your choice). No data leaves your machine, no API cost. If the local endpoint isn't running, layer 4 is silently skipped. Bring your own API key (`RECUT_L4_BACKEND=anthropic|openai`) for higher-accuracy judgment on ambiguous steps, with a configurable remote call limit (`RECUT_L4_REMOTE_MAX_PCT`, default 20%).
+4. **LLM judge** — defaults to a local model via any OpenAI-compatible runtime (Ollama, LM Studio, llama.cpp, vLLM). No data leaves your machine, no API cost. If the local endpoint isn't running, layer 4 is silently skipped. Set `RECUT_L4_BACKEND=anthropic|openai` for cloud judgment on ambiguous steps.
+5. **Behavioral fingerprinting** — after ~5 traces, builds a per-agent baseline from SQLite history and flags statistical deviations (step count, risk score) as `[fingerprint]`. Pure math, zero API calls.
 
-Use `flagging_depth="fast"` to run only layers 1–3 (zero model cost, instant). Use `"full"` to include layer 4.
+Use `flagging_depth="fast"` to run only layers 1–3 (zero model cost, instant). Use `"full"` to include the LLM judge.
 
 ---
 
 ## Configuration
 
-The most common variables:
+Everything is configurable via environment variables — no config file. Common ones:
 
 ```bash
-RECUT_L4_BACKEND=local          # local (default, free) | anthropic | openai
-RECUT_L4_LOCAL_URL=http://localhost:11434/v1  # Ollama, LM Studio, vLLM, etc.
-RECUT_DEFAULT_SAMPLE_RATE=1.0   # trace fraction, e.g. 0.1 for 10% in production
-RECUT_PRICE_INPUT=3.0           # override input token price per million (your billing unit)
-RECUT_PRICE_OUTPUT=15.0         # override output token price per million
-RECUT_COST_UNIT=USD             # display label — USD, EUR, credits, etc.
-RECUT_API_TIMEOUT=60            # HTTP timeout in seconds for all API calls
+RECUT_L4_BACKEND=local               # local (default, free) | anthropic | openai
+RECUT_L4_LOCAL_URL=http://localhost:11434/v1   # Ollama, LM Studio, vLLM, etc.
+RECUT_META_MODEL_ANTHROPIC=claude-haiku-4-5-20251001  # per-backend model override
+RECUT_DEFAULT_SAMPLE_RATE=0.1        # trace 10% of production calls
+RECUT_SCOPE_CREEP_THRESHOLD=20       # flag after this many steps
+RECUT_STRESS_VARIANTS=3              # variants per stress run
+RECUT_PRICE_INPUT=3.0                # input token price per million (your billing unit)
+RECUT_PRICE_OUTPUT=15.0              # output token price per million
+RECUT_COST_UNIT=USD                  # USD, EUR, credits, etc.
+RECUT_API_TIMEOUT=60                 # HTTP timeout in seconds
 ```
 
-See **[docs/configuration.md](docs/configuration.md)** for the full reference — decorator parameters, `@on_flag` filters, Layer 4 backends, pricing tables, flagging thresholds, caching, sampling, and storage.
+See **[docs/configuration.md](docs/configuration.md)** for the full reference — all 40+ env vars covering Layer 4 tuning, embedding settings, flagging thresholds, risk weights, stress testing, replay diff, fingerprinting, caching, sampling, and storage.
 
 ---
 
