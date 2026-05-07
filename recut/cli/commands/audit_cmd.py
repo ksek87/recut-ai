@@ -6,6 +6,10 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
+from recut.cli.tui.audit_view import AuditView
+from recut.core.auditor import audit
+from recut.storage.db import StorageClient
+
 app = typer.Typer(help="Full structured audit of a recorded trace.")
 console = Console()
 
@@ -20,10 +24,6 @@ def audit_cmd(
 
 
 async def _audit_async(trace_id: str, *, tui: bool = False) -> None:
-    from recut.cli.tui.audit_view import AuditView
-    from recut.core.auditor import audit
-    from recut.storage.db import StorageClient
-
     client = StorageClient()
     trace = client.load_trace(trace_id)
     if not trace:

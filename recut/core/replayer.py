@@ -12,6 +12,7 @@ from recut.schema.trace import RecutStep, RecutTrace
 from recut.storage.circuit_breaker import is_open, record_failure, record_success
 from recut.storage.db import StorageClient
 from recut.storage.models import ForkRow
+from recut.utils import parse_float_env
 
 _log = logging.getLogger(__name__)
 
@@ -85,7 +86,8 @@ def _compute_diff(
     replay_risk = max((s.risk_score for s in replayed_steps), default=0.0)
     risk_delta = replay_risk - orig_risk
 
-    if abs(risk_delta) < 0.1:
+    diff_risk_delta = parse_float_env("RECUT_DIFF_RISK_DELTA", 0.1)
+    if abs(risk_delta) < diff_risk_delta:
         summary = "The agent behaved similarly after the change — the injection had little visible effect."
     elif risk_delta > 0:
         summary = (

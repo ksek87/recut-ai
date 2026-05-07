@@ -3,6 +3,8 @@ from __future__ import annotations
 import typer
 from rich.console import Console
 
+from recut import __version__
+
 app = typer.Typer(
     name="recut",
     help="Intercept, replay, and audit your AI agent runs.",
@@ -35,8 +37,6 @@ def main(
     ctx: typer.Context, version: bool = typer.Option(False, "--version", "-v", help="Show version")
 ) -> None:
     if version:
-        from recut import __version__
-
         console.print(f"recut-ai v{__version__}")
         raise typer.Exit()
     if ctx.invoked_subcommand is None:

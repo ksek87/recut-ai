@@ -5,6 +5,12 @@ import asyncio
 import typer
 from rich.console import Console
 
+from recut.core.interceptor import intercept
+from recut.core.tracer import trace_context
+from recut.providers.anthropic import AnthropicProvider
+from recut.schema.hooks import RecutFlagEvent
+from recut.schema.trace import TraceMode
+
 app = typer.Typer(help="Run an agent with live interception.")
 console = Console()
 
@@ -22,12 +28,6 @@ def intercept_cmd(
 
 
 async def _intercept_async(prompt: str, agent_id: str, pause_on: str | None) -> None:
-    from recut.core.interceptor import intercept
-    from recut.core.tracer import trace_context
-    from recut.providers.anthropic import AnthropicProvider
-    from recut.schema.hooks import RecutFlagEvent
-    from recut.schema.trace import TraceMode
-
     provider = AnthropicProvider()
 
     def flag_handler(event: RecutFlagEvent) -> None:

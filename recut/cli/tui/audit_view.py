@@ -3,6 +3,7 @@ from __future__ import annotations
 from textual.app import App, ComposeResult
 from textual.widgets import DataTable, Footer, Header, Markdown
 
+from recut.providers._pricing import format_cost
 from recut.schema.audit import AuditRecord
 from recut.schema.trace import FlagSource, RecutTrace, Severity
 
@@ -13,6 +14,7 @@ _SOURCE_LABEL: dict[FlagSource, str] = {
     FlagSource.EMBEDDING: "\\[embedding]",
     FlagSource.NATIVE: "\\[native]",
     FlagSource.LLM: "\\[judge]",
+    FlagSource.FINGERPRINT: "\\[fingerprint]",
 }
 
 
@@ -83,8 +85,6 @@ class AuditView(App):
             k.replace("_count", "").replace("_", " "): v for k, v in profile.items() if v > 0
         }
         profile_lines = "\n".join(f"- **{k}**: {v}" for k, v in nonzero.items()) or "_none_"
-
-        from recut.providers._pricing import format_cost
 
         total_cost = sum(s.token_cost for s in self._trace.steps if s.token_cost)
         cost_line = f"  |  **Cost:** {format_cost(total_cost)}" if total_cost else ""

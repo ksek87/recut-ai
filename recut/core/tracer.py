@@ -4,13 +4,16 @@ import asyncio
 import functools
 import json
 import logging
-import os
 import random
 import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Literal
 
+from recut.core.auditor import audit as _audit
+from recut.core.auditor import peek as _peek
+from recut.flagging.fingerprint import get_fingerprint_flags
+from recut.providers.anthropic import AnthropicProvider
 from recut.providers.base import AbstractProvider
 from recut.schema.trace import (
     RecutStep,
@@ -22,8 +25,21 @@ from recut.schema.trace import (
 from recut.storage.circuit_breaker import is_open, record_failure, record_success
 from recut.storage.db import StorageClient
 from recut.storage.models import TraceRow
+from recut.utils import parse_float_env, parse_int_env
 
 _log = logging.getLogger(__name__)
+
+
+class RecutBudgetExceededError(Exception):
+    """Raised when a trace accumulates token cost beyond its configured token_budget."""
+
+    def __init__(self, agent_id: str, accumulated_cost: float, budget: float) -> None:
+        self.agent_id = agent_id
+        self.accumulated_cost = accumulated_cost
+        self.budget = budget
+        super().__init__(
+            f"Agent '{agent_id}' exceeded token budget ({accumulated_cost:.4f} > {budget:.4f})"
+        )
 
 
 class RecutContext:
@@ -39,15 +55,34 @@ class RecutContext:
         trace: RecutTrace,
         provider: AbstractProvider,
         flag_handlers: list[Callable],
+        token_budget: float | None = None,
+        budget_hard_limit: bool = False,
     ):
         self.trace = trace
         self.provider = provider
         self._flag_handlers = flag_handlers
         self._started_at = time.monotonic()
+        self._token_budget = token_budget
+        self._budget_hard_limit = budget_hard_limit
 
     def add_step(self, step: RecutStep) -> None:
         self.trace.steps.append(step)
         self.trace.meta.total_steps = len(self.trace.steps)
+        if self._token_budget is not None and step.token_cost is not None:
+            accumulated = sum(s.token_cost for s in self.trace.steps if s.token_cost)
+            if accumulated > self._token_budget:
+                if self._budget_hard_limit:
+                    raise RecutBudgetExceededError(
+                        agent_id=self.trace.agent_id,
+                        accumulated_cost=accumulated,
+                        budget=self._token_budget,
+                    )
+                _log.warning(
+                    "recut: agent '%s' cost %.4f exceeded budget %.4f",
+                    self.trace.agent_id,
+                    accumulated,
+                    self._token_budget,
+                )
 
     @property
     def risk_score(self) -> float:
@@ -76,6 +111,9 @@ def trace(
     sample_rate: float = 1.0,
     trace_if: Callable[[RecutContext], bool] | None = None,
     flag_handlers: list[Callable] | None = None,
+    flagging_depth: Literal["fast", "full"] | None = None,
+    token_budget: float | None = None,
+    budget_hard_limit: bool = False,
 ) -> Callable:
     """
     Decorator that wraps any async function and captures its agent run as a RecutTrace.
@@ -94,19 +132,12 @@ def trace(
         @functools.wraps(fn)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
             # Selective tracing — honour sample_rate
-            try:
-                effective_rate = float(os.environ.get("RECUT_DEFAULT_SAMPLE_RATE", sample_rate))
-            except (ValueError, TypeError):
-                _log.warning(
-                    "recut: invalid RECUT_DEFAULT_SAMPLE_RATE env var; using default %s",
-                    sample_rate,
-                )
-                effective_rate = float(sample_rate)
+            effective_rate = parse_float_env("RECUT_DEFAULT_SAMPLE_RATE", float(sample_rate))
             if random.random() > effective_rate:
                 return await fn(*args, **kwargs)
 
-            _mode = TraceMode(mode) if isinstance(mode, str) else mode
-            _language = TraceLanguage(language) if isinstance(language, str) else language
+            _mode = _coerce_mode(mode)
+            _language = _coerce_language(language)
             _provider = provider or _default_provider()
 
             trace_obj = RecutTrace(
@@ -124,6 +155,8 @@ def trace(
                 trace=trace_obj,
                 provider=_provider,
                 flag_handlers=flag_handlers or [],
+                token_budget=token_budget,
+                budget_hard_limit=budget_hard_limit,
             )
 
             # trace_if exceptions are caught and treated as False (skip tracing)
@@ -139,6 +172,13 @@ def trace(
             result = await fn(*args, **kwargs)
 
             ctx.finalize()
+
+            if flagging_depth is not None:
+                if flagging_depth == "full":
+                    await _audit(ctx.trace, flagging_depth="full")
+                else:
+                    await _peek(ctx.trace, flagging_depth="fast")
+
             asyncio.create_task(_persist_trace(ctx.trace))
 
             return result
@@ -164,8 +204,8 @@ async def trace_context(
             async for step in provider.run_agent(prompt):
                 ctx.add_step(step)
     """
-    _mode = TraceMode(mode) if isinstance(mode, str) else mode
-    _language = TraceLanguage(language) if isinstance(language, str) else language
+    _mode = _coerce_mode(mode)
+    _language = _coerce_language(language)
     _provider = provider or _default_provider()
 
     trace_obj = RecutTrace(
@@ -187,6 +227,14 @@ async def trace_context(
         asyncio.create_task(_persist_trace(ctx.trace))
 
 
+def _coerce_mode(mode: TraceMode | str) -> TraceMode:
+    return TraceMode(mode) if isinstance(mode, str) else mode
+
+
+def _coerce_language(language: TraceLanguage | str) -> TraceLanguage:
+    return TraceLanguage(language) if isinstance(language, str) else language
+
+
 def _extract_prompt(args: tuple, kwargs: dict) -> str:
     """Best-effort extraction of the prompt string from call arguments."""
     if "prompt" in kwargs:
@@ -197,15 +245,30 @@ def _extract_prompt(args: tuple, kwargs: dict) -> str:
 
 
 def _default_provider() -> AbstractProvider:
-    from recut.providers.anthropic import AnthropicProvider
-
     return AnthropicProvider()
+
+
+async def _maybe_fingerprint(trace: RecutTrace) -> None:
+    """Load historical traces for this agent and attach fingerprint flags to the last step."""
+    try:
+        client = StorageClient()
+        loop = asyncio.get_running_loop()
+        history_limit = parse_int_env("RECUT_FINGERPRINT_HISTORY_LIMIT", 50, minimum=1)
+        history = await loop.run_in_executor(
+            None, client.load_recent_traces, trace.agent_id, history_limit
+        )
+        flags = get_fingerprint_flags(trace, history)
+        if flags and trace.steps:
+            trace.steps[-1].flags.extend(flags)
+    except Exception as exc:
+        _log.debug("recut: fingerprinting skipped: %s", exc)
 
 
 async def _persist_trace(trace: RecutTrace) -> None:
     if is_open():
         return
     try:
+        await _maybe_fingerprint(trace)
         row = TraceRow(
             id=trace.id,
             created_at=trace.created_at,

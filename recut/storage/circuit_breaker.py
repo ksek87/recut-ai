@@ -1,25 +1,17 @@
 from __future__ import annotations
 
 import logging
-import os
 import time
+
+from recut.utils import parse_int_env
 
 _log = logging.getLogger(__name__)
 
 _failure_count: int = 0
 _disabled_until: float = 0.0
 
-try:
-    _THRESHOLD = int(os.environ.get("RECUT_CB_THRESHOLD", 5))
-except (ValueError, TypeError):
-    _log.warning("recut: invalid RECUT_CB_THRESHOLD; using 5")
-    _THRESHOLD = 5
-
-try:
-    _COOLDOWN = int(os.environ.get("RECUT_CB_COOLDOWN", 60))
-except (ValueError, TypeError):
-    _log.warning("recut: invalid RECUT_CB_COOLDOWN; using 60")
-    _COOLDOWN = 60
+_THRESHOLD = parse_int_env("RECUT_CB_THRESHOLD", 5, minimum=1)
+_COOLDOWN = parse_int_env("RECUT_CB_COOLDOWN", 60, minimum=1)
 
 
 def record_failure() -> None:

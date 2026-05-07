@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 
+from recut.utils import parse_float_env
+
 # Pricing per million tokens: (input_price, output_price)
 ANTHROPIC_PRICING: dict[str, tuple[float, float]] = {
     "claude-opus-4-7": (15.0, 75.0),
@@ -42,12 +44,10 @@ def resolve_cost(
     env_input = os.environ.get("RECUT_PRICE_INPUT")
     env_output = os.environ.get("RECUT_PRICE_OUTPUT")
     if env_input is not None and env_output is not None:
-        try:
-            input_price = float(env_input)
-            output_price = float(env_output)
+        input_price = parse_float_env("RECUT_PRICE_INPUT", 0.0)
+        output_price = parse_float_env("RECUT_PRICE_OUTPUT", 0.0)
+        if input_price or output_price:
             return (input_tokens * input_price + output_tokens * output_price) / 1_000_000
-        except ValueError:
-            pass
 
     lookup = _normalize_model(model) if strip_date_suffix else model
     pricing = pricing_table.get(lookup) or pricing_table.get(model)

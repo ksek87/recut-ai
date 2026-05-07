@@ -6,6 +6,12 @@ import json
 import typer
 from rich.console import Console
 
+from recut.cli.tui.diff_view import DiffView
+from recut.core.replayer import replay
+from recut.providers.anthropic import AnthropicProvider
+from recut.schema.fork import ForkInjection, InjectionTarget
+from recut.storage.db import StorageClient
+
 app = typer.Typer(help="Replay a trace from a fork point.")
 console = Console()
 
@@ -26,12 +32,6 @@ def replay_cmd(
 async def _replay_async(
     trace_id: str, step_index: int, inject_json: str, *, tui: bool = False
 ) -> None:
-    from recut.cli.tui.diff_view import DiffView
-    from recut.core.replayer import replay
-    from recut.providers.anthropic import AnthropicProvider
-    from recut.schema.fork import ForkInjection, InjectionTarget
-    from recut.storage.db import StorageClient
-
     client = StorageClient()
     trace = client.load_trace(trace_id)
     if not trace:

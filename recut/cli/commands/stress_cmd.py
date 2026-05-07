@@ -6,6 +6,10 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from recut.core.stress import stress
+from recut.providers.anthropic import AnthropicProvider
+from recut.storage.db import StorageClient
+
 app = typer.Typer(help="Stress test a trace with auto-generated variants.")
 console = Console()
 
@@ -20,10 +24,6 @@ def stress_cmd(
 
 
 async def _stress_async(trace_id: str, num_variants: int) -> None:
-    from recut.core.stress import stress
-    from recut.providers.anthropic import AnthropicProvider
-    from recut.storage.db import StorageClient
-
     client = StorageClient()
     trace = client.load_trace(trace_id)
     if not trace:

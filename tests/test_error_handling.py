@@ -153,7 +153,7 @@ class TestLayer4ErrorHandling:
         with (
             patch.dict(os.environ, {"RECUT_L4_BACKEND": "anthropic"}),
             patch(
-                "recut.flagging.engine._call_l4_api",
+                "recut.flagging.layers.llm_judge._call_l4_api",
                 side_effect=anthropic.RateLimitError(
                     message="rate limited",
                     response=MagicMock(status_code=429, headers={}),
@@ -173,7 +173,7 @@ class TestLayer4ErrorHandling:
         with (
             patch.dict(os.environ, {"RECUT_L4_BACKEND": "anthropic"}),
             patch(
-                "recut.flagging.engine._call_l4_api",
+                "recut.flagging.layers.llm_judge._call_l4_api",
                 new_callable=AsyncMock,
                 return_value="this is not json",
             ),
@@ -189,7 +189,7 @@ class TestLayer4ErrorHandling:
         with (
             patch.dict(os.environ, {"RECUT_L4_BACKEND": "anthropic"}),
             patch(
-                "recut.flagging.engine._call_l4_api",
+                "recut.flagging.layers.llm_judge._call_l4_api",
                 new_callable=AsyncMock,
                 return_value="",
             ),
@@ -204,7 +204,7 @@ class TestLayer4ErrorHandling:
         with (
             patch.dict(os.environ, {"RECUT_L4_BACKEND": "anthropic"}),
             patch(
-                "recut.flagging.engine._call_l4_api",
+                "recut.flagging.layers.llm_judge._call_l4_api",
                 side_effect=anthropic.APIConnectionError(request=MagicMock()),
             ) as mock_call,
             caplog.at_level(logging.WARNING),
@@ -223,7 +223,7 @@ class TestLayer4ErrorHandling:
         with (
             patch.dict(os.environ, {"RECUT_L4_BACKEND": "local"}),
             patch(
-                "recut.flagging.engine._call_l4_api",
+                "recut.flagging.layers.llm_judge._call_l4_api",
                 side_effect=anthropic.APIConnectionError(request=MagicMock()),
             ) as mock_call,
             caplog.at_level(logging.DEBUG),

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import os
+from recut.utils import parse_float_env
 
 
 class Thresholds:
-    LOW: float = float(os.environ.get("RECUT_FLAG_THRESHOLD_LOW", 0.4))
-    MEDIUM: float = float(os.environ.get("RECUT_FLAG_THRESHOLD_MEDIUM", 0.65))
-    HIGH: float = float(os.environ.get("RECUT_FLAG_THRESHOLD_HIGH", 0.85))
+    LOW: float = parse_float_env("RECUT_FLAG_THRESHOLD_LOW", 0.4)
+    MEDIUM: float = parse_float_env("RECUT_FLAG_THRESHOLD_MEDIUM", 0.65)
+    HIGH: float = parse_float_env("RECUT_FLAG_THRESHOLD_HIGH", 0.85)
 
 
 UNCERTAINTY_PHRASES = [

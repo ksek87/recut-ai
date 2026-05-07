@@ -8,6 +8,7 @@ from recut.plain.summariser import flag_suggested_action, summarise_step, summar
 from recut.schema.audit import AuditMode, AuditRecord, ReviewStatus, RiskProfile
 from recut.schema.hooks import RecutFlagEvent
 from recut.schema.trace import FlagType, RecutFlag, RecutTrace, Severity, TraceMode
+from recut.utils import get_context_window, parse_float_env
 
 _SEVERITY_RANK = {Severity.LOW: 1, Severity.MEDIUM: 2, Severity.HIGH: 3}
 
@@ -51,7 +52,8 @@ async def _score_trace_steps(trace: RecutTrace, engine: FlaggingEngine) -> None:
         step.plain_summary = summarise_step(step, trace.language)
 
         if _fire and flags:
-            preceding = trace.steps[max(0, i - 2) : i]
+            window = get_context_window()
+            preceding = trace.steps[max(0, i - window) : i]
             for flag in flags:
                 event = RecutFlagEvent(
                     trace_id=trace.id,
@@ -67,7 +69,11 @@ async def _score_trace_steps(trace: RecutTrace, engine: FlaggingEngine) -> None:
 def _compute_risk_score(flags: list[RecutFlag]) -> float:
     if not flags:
         return 0.0
-    weights = {Severity.LOW: 0.3, Severity.MEDIUM: 0.6, Severity.HIGH: 1.0}
+    weights = {
+        Severity.LOW: parse_float_env("RECUT_RISK_WEIGHT_LOW", 0.3),
+        Severity.MEDIUM: parse_float_env("RECUT_RISK_WEIGHT_MEDIUM", 0.6),
+        Severity.HIGH: parse_float_env("RECUT_RISK_WEIGHT_HIGH", 1.0),
+    }
     scores = [weights.get(f.severity, 0.0) for f in flags]
     return min(1.0, max(scores))
 
