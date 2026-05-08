@@ -90,19 +90,41 @@ async def stress(
         key=lambda s: s.risk_score,
         reverse=True,
     )
-
     if not flagged_steps:
         return []
 
-    # Build the list of variants to run (up to effective_variants)
+    variant_specs = _build_variant_specs(flagged_steps, effective_variants)
+    tasks = [
+        _run_variant(
+            step,
+            flag,
+            strategy,
+            injection_content,
+            i,
+            trace,
+            provider,
+            failed_threshold,
+            degraded_threshold,
+        )
+        for i, (step, flag, strategy, injection_content) in enumerate(variant_specs)
+    ]
+    results = await asyncio.gather(*tasks)
+    return [r for r in results if r is not None]
+
+
+def _build_variant_specs(
+    flagged_steps: list[RecutStep],
+    max_variants: int,
+) -> list[tuple[RecutStep, RecutFlag, InjectionStrategy, str]]:
+    """Select step/flag/strategy combinations up to max_variants, avoiding repeats."""
     seen_strategies: set[tuple] = set()
-    variant_specs: list[tuple] = []  # (step, flag, strategy, injection_content)
+    specs: list[tuple[RecutStep, RecutFlag, InjectionStrategy, str]] = []
 
     for step in flagged_steps:
-        if len(variant_specs) >= effective_variants:
+        if len(specs) >= max_variants:
             break
         for flag in step.flags:
-            if len(variant_specs) >= effective_variants:
+            if len(specs) >= max_variants:
                 break
             strategies = _STRATEGY_BY_FLAG.get(flag.type.value, _ALL_STRATEGIES)
             strategy = _pick_strategy(strategies, seen_strategies, step.index)
@@ -112,64 +134,64 @@ async def stress(
             injection_content = _STRATEGY_INJECTIONS.get(
                 strategy, "Unexpected input — please handle gracefully."
             )
-            variant_specs.append((step, flag, strategy, injection_content))
+            specs.append((step, flag, strategy, injection_content))
 
-    async def _run_variant(
-        step: RecutStep,
-        flag: RecutFlag,
-        strategy: InjectionStrategy,
-        injection_content: str,
-        variant_index: int,
-    ) -> RecutStressRun | None:
-        async with _VARIANT_SEM:
-            try:
-                injection = ForkInjection(
-                    target=InjectionTarget.TOOL_RESULT,
-                    original_content=step.content,
-                    injected_content=injection_content,
-                )
-                fork = await replay(
-                    trace=trace,
-                    fork_step_index=step.index,
-                    injection=injection,
-                    provider=provider,
-                    fork_type=ForkType.STRESS_VARIANT,
-                )
-                original_risk = step.risk_score
-                risk_delta = fork.diff.risk_delta if fork.diff else 0.0
-                fork_risk = original_risk + risk_delta
-                verdict = (
-                    StressVerdict.FAILED
-                    if fork_risk >= failed_threshold
-                    else StressVerdict.DEGRADED
-                    if risk_delta > degraded_threshold
-                    else StressVerdict.STABLE
-                )
-                return RecutStressRun(
-                    parent_trace_id=trace.id,
-                    source_flag_type=flag.type.value,
-                    variant_index=variant_index,
-                    injection_strategy=strategy,
-                    fork_id=fork.id,
-                    verdict=verdict,
-                    plain_summary=_plain_verdict(verdict, strategy),
-                    risk_delta=round(risk_delta, 3),
-                )
-            except Exception as exc:
-                _log.warning(
-                    "recut: stress variant %d failed (strategy=%s): %s",
-                    variant_index,
-                    strategy.value,
-                    exc,
-                )
-                return None
+    return specs
 
-    tasks = [
-        _run_variant(step, flag, strategy, injection_content, i)
-        for i, (step, flag, strategy, injection_content) in enumerate(variant_specs)
-    ]
-    results = await asyncio.gather(*tasks)
-    return [r for r in results if r is not None]
+
+async def _run_variant(
+    step: RecutStep,
+    flag: RecutFlag,
+    strategy: InjectionStrategy,
+    injection_content: str,
+    variant_index: int,
+    trace: RecutTrace,
+    provider: AbstractProvider,
+    failed_threshold: float,
+    degraded_threshold: float,
+) -> RecutStressRun | None:
+    async with _VARIANT_SEM:
+        try:
+            injection = ForkInjection(
+                target=InjectionTarget.TOOL_RESULT,
+                original_content=step.content,
+                injected_content=injection_content,
+            )
+            fork = await replay(
+                trace=trace,
+                fork_step_index=step.index,
+                injection=injection,
+                provider=provider,
+                fork_type=ForkType.STRESS_VARIANT,
+            )
+            original_risk = step.risk_score
+            risk_delta = fork.diff.risk_delta if fork.diff else 0.0
+            fork_risk = original_risk + risk_delta
+            verdict = (
+                StressVerdict.FAILED
+                if fork_risk >= failed_threshold
+                else StressVerdict.DEGRADED
+                if risk_delta > degraded_threshold
+                else StressVerdict.STABLE
+            )
+            return RecutStressRun(
+                parent_trace_id=trace.id,
+                source_flag_type=flag.type.value,
+                variant_index=variant_index,
+                injection_strategy=strategy,
+                fork_id=fork.id,
+                verdict=verdict,
+                plain_summary=_plain_verdict(verdict, strategy),
+                risk_delta=round(risk_delta, 3),
+            )
+        except Exception as exc:
+            _log.warning(
+                "recut: stress variant %d failed (strategy=%s): %s",
+                variant_index,
+                strategy.value,
+                exc,
+            )
+            return None
 
 
 def _pick_strategy(

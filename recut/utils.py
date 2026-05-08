@@ -27,6 +27,14 @@ def parse_int_env(key: str, default: int, minimum: int | None = None) -> int:
     return max(minimum, value) if minimum is not None else value
 
 
+def parse_bool_env(key: str, default: bool) -> bool:
+    """Read an env var as bool; returns default if absent or unrecognised."""
+    val = os.environ.get(key)
+    if val is None:
+        return default
+    return val.lower() in ("1", "true", "yes")
+
+
 def get_context_window() -> int:
     """Return the number of preceding steps used for context in flagging/caching."""
     return parse_int_env("RECUT_CONTEXT_WINDOW_SIZE", 2, minimum=1)

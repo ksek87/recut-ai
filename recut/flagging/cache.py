@@ -6,13 +6,12 @@ import asyncio
 import hashlib
 import json
 import logging
-import os
 from datetime import UTC, datetime, timedelta
 
 from recut.schema.trace import RecutFlag, RecutStep
 from recut.storage.db import StorageClient
 from recut.storage.models import FlagCache
-from recut.utils import get_context_window, parse_int_env
+from recut.utils import get_context_window, parse_bool_env, parse_int_env
 
 _log = logging.getLogger(__name__)
 
@@ -27,7 +26,7 @@ def _cache_key(step: RecutStep, preceding: list[RecutStep]) -> str:
 
 
 async def _get_cached_flags(content_hash: str) -> list[RecutFlag] | None:
-    if os.environ.get("RECUT_CACHE_ENABLED", "true").lower() != "true":
+    if not parse_bool_env("RECUT_CACHE_ENABLED", True):
         return None
 
     entry = _mem_cache.get(content_hash)
@@ -50,7 +49,7 @@ async def _get_cached_flags(content_hash: str) -> list[RecutFlag] | None:
 
 
 async def _cache_flags(content_hash: str, flags: list[RecutFlag]) -> None:
-    if os.environ.get("RECUT_CACHE_ENABLED", "true").lower() != "true":
+    if not parse_bool_env("RECUT_CACHE_ENABLED", True):
         return
 
     ttl = parse_int_env("RECUT_CACHE_TTL", 3600, minimum=1)

@@ -14,6 +14,8 @@ from recut.utils import get_context_window
 
 _log = logging.getLogger(__name__)
 
+_SEVERITY_RANK = {"low": 1, "medium": 2, "high": 3}
+
 
 class InterceptSession:
     """
@@ -80,9 +82,8 @@ class InterceptSession:
     def _should_pause(self, flag: RecutFlag) -> bool:
         if self._pause_on_severity is None:
             return False
-        severity_order = {"low": 1, "medium": 2, "high": 3}
-        flag_level = severity_order.get(flag.severity.value, 0)
-        pause_level = severity_order.get(self._pause_on_severity, 999)
+        flag_level = _SEVERITY_RANK.get(flag.severity.value, 0)
+        pause_level = _SEVERITY_RANK.get(self._pause_on_severity, 999)
         return flag_level >= pause_level
 
 
