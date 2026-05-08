@@ -52,3 +52,13 @@ async def _audit_async(trace_id: str, *, tui: bool = False) -> None:
         console.print("\n[bold]Risk profile:[/bold]")
         for k, v in nonzero.items():
             console.print(f"  {k.replace('_count', '').replace('_', ' ')}: {v}")
+
+    if record.l4_judge_fires:
+        confirmed = record.l4_confirmed
+        fp = record.l4_false_positives
+        unreviewed = record.l4_judge_fires - confirmed - fp
+        console.print(
+            f"\n[bold]Layer 4 calibration:[/bold] "
+            f"{record.l4_judge_fires} judge flags — "
+            f"{confirmed} confirmed, {fp} false positive, {unreviewed} unreviewed"
+        )

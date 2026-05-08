@@ -267,8 +267,32 @@ RECUT_DEFAULT_SAMPLE_RATE=0.1
 | `RECUT_DB_URL` | *(unset)* | PostgreSQL connection string — overrides `RECUT_DB_PATH` when set |
 | `RECUT_CB_THRESHOLD` | `5` | Consecutive storage failures before the circuit breaker trips |
 | `RECUT_CB_COOLDOWN` | `60` | Seconds before the circuit breaker resets after tripping |
+| `RECUT_WRITE_QUEUE_MAXSIZE` | `0` | Max pending writes in the async queue (`0` = unlimited) |
+| `RECUT_WRITE_QUEUE_DRAIN_TIMEOUT` | `30.0` | Seconds to wait when draining the queue on shutdown |
 
 When the circuit breaker is open, trace persistence is skipped silently — the agent continues running.
+
+All writes are serialized through a background worker queue, preventing SQLite write contention under concurrent traces.
+
+## PII Scrubbing
+
+Opt-in PII scrubbing redacts sensitive values before storing step content and prompts in SQLite.
+
+| Variable | Default | Description |
+|---|---|---|
+| `RECUT_PII_SCRUB` | `false` | Set to `true` to enable PII scrubbing before storage |
+| `RECUT_PII_PATTERNS` | `email,phone,ssn,credit_card,ip_address` | Comma-separated list of patterns to apply |
+
+Matched values are replaced with `[REDACTED]`. Scrubbing applies to step content, reasoning content, and the original prompt stored in SQLite. The in-memory trace object is not mutated.
+
+```bash
+# Enable all patterns
+RECUT_PII_SCRUB=true
+
+# Enable only email and phone scrubbing
+RECUT_PII_SCRUB=true
+RECUT_PII_PATTERNS=email,phone
+```
 
 ---
 

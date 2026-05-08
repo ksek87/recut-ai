@@ -7,7 +7,7 @@ from recut.hooks import fire_all, has_handlers
 from recut.plain.summariser import flag_suggested_action, summarise_step, summarise_trace
 from recut.schema.audit import AuditMode, AuditRecord, ReviewStatus, RiskProfile
 from recut.schema.hooks import RecutFlagEvent
-from recut.schema.trace import FlagType, RecutFlag, RecutTrace, Severity, TraceMode
+from recut.schema.trace import FlagSource, FlagType, RecutFlag, RecutTrace, Severity, TraceMode
 from recut.utils import get_context_window, parse_float_env
 
 _SEVERITY_RANK = {Severity.LOW: 1, Severity.MEDIUM: 2, Severity.HIGH: 3}
@@ -84,6 +84,7 @@ def _build_audit_record(trace: RecutTrace, mode: AuditMode) -> AuditRecord:
 
     top = max((f.severity for f in all_flags), key=lambda s: _SEVERITY_RANK.get(s, 0), default=None)
     highest = top.value if top else None
+    l4_fires = sum(1 for f in all_flags if f.source == FlagSource.LLM)
 
     return AuditRecord(
         trace_id=trace.id,
@@ -92,6 +93,7 @@ def _build_audit_record(trace: RecutTrace, mode: AuditMode) -> AuditRecord:
         flag_count=len(all_flags),
         highest_severity=highest,
         risk_profile=profile,
+        l4_judge_fires=l4_fires,
         review_status=ReviewStatus.PENDING_HUMAN
         if highest == Severity.HIGH.value
         else ReviewStatus.AUTO,
