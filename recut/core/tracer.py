@@ -22,9 +22,11 @@ from recut.schema.trace import (
     TraceMeta,
     TraceMode,
 )
+from recut.storage import write_queue
 from recut.storage.circuit_breaker import is_open, record_failure, record_success
 from recut.storage.db import StorageClient
 from recut.storage.models import TraceRow
+from recut.storage.pii import scrub, scrub_steps
 from recut.utils import parse_float_env, parse_int_env
 
 _log = logging.getLogger(__name__)
@@ -179,7 +181,7 @@ def trace(
                 else:
                     await _peek(ctx.trace, flagging_depth="fast")
 
-            asyncio.create_task(_persist_trace(ctx.trace))
+            await write_queue.enqueue(_persist_trace(ctx.trace))
 
             return result
 
@@ -269,11 +271,12 @@ async def _persist_trace(trace: RecutTrace) -> None:
         return
     try:
         await _maybe_fingerprint(trace)
+        steps_data = scrub_steps([s.model_dump(mode="json") for s in trace.steps])
         row = TraceRow(
             id=trace.id,
             created_at=trace.created_at,
             agent_id=trace.agent_id,
-            prompt=trace.prompt,
+            prompt=scrub(trace.prompt),
             mode=trace.mode.value,
             language=trace.language.value,
             model=trace.meta.model,
@@ -282,7 +285,7 @@ async def _persist_trace(trace: RecutTrace) -> None:
             total_steps=trace.meta.total_steps,
             token_count=trace.meta.token_count,
             thinking_tokens=trace.meta.thinking_tokens,
-            steps_json=json.dumps([s.model_dump(mode="json") for s in trace.steps]),
+            steps_json=json.dumps(steps_data),
         )
         loop = asyncio.get_running_loop()
         client = StorageClient()

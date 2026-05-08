@@ -12,7 +12,6 @@ Set flagging_depth="full" for compliance passes that include the LLM judge.
 
 from __future__ import annotations
 
-import os
 from typing import Literal
 
 from recut.flagging.cache import (
@@ -37,7 +36,7 @@ from recut.flagging.layers.llm_judge import (
 from recut.flagging.layers.native import layer3_native_mismatch as _layer3_native_mismatch
 from recut.flagging.layers.rules import layer1_rules as _layer1_rules
 from recut.schema.trace import ReasoningSource, RecutFlag, RecutStep, StepType, TraceMode
-from recut.utils import get_context_window
+from recut.utils import get_context_window, parse_bool_env
 
 # Re-export private names so existing patch targets and direct test imports keep working.
 __all__ = [
@@ -73,7 +72,7 @@ class FlaggingEngine:
         self._use_embeddings = (
             use_embeddings
             if use_embeddings is not None
-            else (os.environ.get("RECUT_USE_EMBEDDINGS", "true").lower() == "true")
+            else parse_bool_env("RECUT_USE_EMBEDDINGS", True)
         )
         if use_llm_judge is not None:
             self._use_llm_judge = use_llm_judge

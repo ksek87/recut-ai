@@ -44,3 +44,7 @@ class AuditRecord(BaseModel):
     review_notes: str | None = None
     reviewer: str | None = None
     exported_at: datetime | None = None
+    # Layer 4 calibration counters
+    l4_judge_fires: int = 0
+    l4_confirmed: int = 0
+    l4_false_positives: int = 0

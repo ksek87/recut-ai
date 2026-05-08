@@ -115,19 +115,14 @@ class TestFlaggingDepthDecorator:
         mock_audit.assert_not_called()
 
     async def test_flagging_depth_scoring_happens_before_persist(self):
-        """peek runs before _persist_trace is scheduled — both are called once."""
+        """peek runs before _persist_trace is enqueued — both are called once."""
         call_order = []
 
         async def fake_peek(tr, flagging_depth="fast"):
             call_order.append("peek")
 
-        import asyncio as _asyncio
-
-        original_create_task = _asyncio.create_task
-
-        def capture_task(coro, **kw):
-            call_order.append("create_task")
-            return original_create_task(coro, **kw)
+        async def capture_enqueue(coro):
+            call_order.append("enqueue")
 
         @trace(agent_id="a", sample_rate=1.0, provider=_StubProvider(), flagging_depth="fast")
         async def my_agent(prompt: str, **kwargs) -> str:
@@ -135,12 +130,12 @@ class TestFlaggingDepthDecorator:
 
         with (
             patch("recut.core.tracer._peek", fake_peek),
-            patch("recut.core.tracer.asyncio.create_task", side_effect=capture_task),
+            patch("recut.storage.write_queue.enqueue", side_effect=capture_enqueue),
             patch("recut.core.tracer.StorageClient"),
         ):
             await my_agent("hello")
 
-        assert call_order == ["peek", "create_task"]
+        assert call_order == ["peek", "enqueue"]
 
 
 # ===========================================================================
