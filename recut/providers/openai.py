@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import AsyncIterator
+from typing import Any
 
 import openai as _openai
 
@@ -104,51 +105,11 @@ class OpenAIProvider(AbstractProvider):
         if tools:
             kwargs["tools"] = tools
 
-        step_index = 0
         response = await self._client.chat.completions.create(**kwargs)
-        if not response.choices:
-            return
-        choice = response.choices[0]
-
-        usage = getattr(response, "usage", None)
-        input_tokens = getattr(usage, "prompt_tokens", 0) if usage else 0
-        output_tokens = getattr(usage, "completion_tokens", 0) if usage else 0
-        total_tokens = input_tokens + output_tokens
-        cost = resolve_cost(
-            OPENAI_PRICING, self.model, input_tokens, output_tokens, strip_date_suffix=True
-        )
-
-        if choice.message.tool_calls:
-            n_steps = max(len(choice.message.tool_calls), 1)
-            per_step_tokens = total_tokens // n_steps
-            per_step_cost = cost / n_steps if cost is not None else None
-
-            for tc in choice.message.tool_calls:
-                reasoning = (
-                    await self._infer_reasoning(json.dumps(tc.function.__dict__))
-                    if self.infer_reasoning
-                    else None
-                )
-                yield RecutStep(
-                    index=step_index,
-                    type=StepType.TOOL_CALL,
-                    content=json.dumps({"name": tc.function.name, "input": tc.function.arguments}),
-                    reasoning=reasoning,
-                    token_count=per_step_tokens,
-                    token_cost=per_step_cost,
-                )
-                step_index += 1
-        else:
-            content = choice.message.content or ""
-            reasoning = await self._infer_reasoning(content) if self.infer_reasoning else None
-            yield RecutStep(
-                index=step_index,
-                type=StepType.OUTPUT,
-                content=content,
-                reasoning=reasoning,
-                token_count=total_tokens,
-                token_cost=cost,
-            )
+        for step in _parse_openai_response_to_steps(response, model=self.model):
+            if self.infer_reasoning and step.type != StepType.REASONING:
+                step.reasoning = await self._infer_reasoning(step.content)
+            yield step
 
     async def replay_from(
         self,
@@ -164,3 +125,47 @@ class OpenAIProvider(AbstractProvider):
             replayed.append(step)
             base_index += 1
         return replayed
+
+
+def _parse_openai_response_to_steps(response: Any, model: str = "unknown") -> list[RecutStep]:
+    """Convert a chat.completions.create() response into RecutStep objects (no inferred reasoning)."""
+    if not getattr(response, "choices", None):
+        return []
+
+    choice = response.choices[0]
+    usage = getattr(response, "usage", None)
+    input_tokens = getattr(usage, "prompt_tokens", 0) if usage else 0
+    output_tokens = getattr(usage, "completion_tokens", 0) if usage else 0
+    total_tokens = input_tokens + output_tokens
+    cost = resolve_cost(OPENAI_PRICING, model, input_tokens, output_tokens, strip_date_suffix=True)
+
+    steps: list[RecutStep] = []
+    step_index = 0
+
+    if choice.message.tool_calls:
+        n_steps = max(len(choice.message.tool_calls), 1)
+        per_step_tokens = total_tokens // n_steps
+        per_step_cost = cost / n_steps if cost is not None else None
+        for tc in choice.message.tool_calls:
+            steps.append(
+                RecutStep(
+                    index=step_index,
+                    type=StepType.TOOL_CALL,
+                    content=json.dumps({"name": tc.function.name, "input": tc.function.arguments}),
+                    token_count=per_step_tokens,
+                    token_cost=per_step_cost,
+                )
+            )
+            step_index += 1
+    else:
+        steps.append(
+            RecutStep(
+                index=step_index,
+                type=StepType.OUTPUT,
+                content=choice.message.content or "",
+                token_count=total_tokens,
+                token_cost=cost,
+            )
+        )
+
+    return steps

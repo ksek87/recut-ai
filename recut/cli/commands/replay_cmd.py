@@ -6,7 +6,10 @@ import json
 import typer
 from rich.console import Console
 
-from recut.cli.tui.diff_view import DiffView
+try:
+    from recut.cli.tui.diff_view import DiffView as _DiffView
+except ImportError:
+    _DiffView = None  # type: ignore[assignment,misc]
 from recut.core.replayer import replay
 from recut.providers.anthropic import AnthropicProvider
 from recut.schema.fork import ForkInjection, InjectionTarget
@@ -63,7 +66,10 @@ async def _replay_async(
     )
 
     if tui:
-        DiffView(trace, fork).run()
+        if _DiffView is None:
+            console.print("[red]TUI requires: pip install 'recut-ai[tui]'[/red]")
+            raise typer.Exit(1)
+        _DiffView(trace, fork).run()
         return
 
     console.print(f"\n[green]Fork created:[/green] {fork.id}")
