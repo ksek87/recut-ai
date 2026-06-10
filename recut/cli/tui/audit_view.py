@@ -18,7 +18,7 @@ _SOURCE_LABEL: dict[FlagSource, str] = {
 }
 
 
-class AuditView(App):
+class AuditView(App):  # type: ignore[misc]
     """Full walkthrough view for a completed AuditRecord."""
 
     TITLE = "recut audit"

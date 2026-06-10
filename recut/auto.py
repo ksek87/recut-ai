@@ -116,7 +116,7 @@ async def _capture_anthropic(
     try:
         from recut.providers.anthropic import _parse_response_to_steps
 
-        model = kwargs.get("model") or getattr(response, "model", "unknown")
+        model = str(kwargs.get("model") or getattr(response, "model", "unknown"))
         steps = _parse_response_to_steps(response, model=model)
         if not steps:
             return
@@ -135,7 +135,7 @@ async def _capture_openai(
     try:
         from recut.providers.openai import _parse_openai_response_to_steps
 
-        model = kwargs.get("model") or getattr(response, "model", "unknown")
+        model = str(kwargs.get("model") or getattr(response, "model", "unknown"))
         steps = _parse_openai_response_to_steps(response, model=model)
         if not steps:
             return

@@ -7,7 +7,7 @@ from recut.schema.audit import AuditRecord
 from recut.schema.trace import RecutTrace, Severity
 
 
-class PeekView(App):
+class PeekView(App):  # type: ignore[misc]
     """Triage view showing all flagged steps from a completed peek/audit."""
 
     TITLE = "recut peek"
