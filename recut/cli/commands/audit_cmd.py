@@ -6,10 +6,7 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
-try:
-    from recut.cli.tui.audit_view import AuditView as _AuditView
-except ImportError:
-    _AuditView = None  # type: ignore[assignment,misc]
+from recut.cli.tui import AuditView, require_tui
 from recut.core.auditor import audit
 from recut.storage.db import StorageClient
 
@@ -36,10 +33,7 @@ async def _audit_async(trace_id: str, *, tui: bool = False) -> None:
     record = await audit(trace)
 
     if tui:
-        if _AuditView is None:
-            console.print("[red]TUI requires: pip install 'recut-ai[tui]'[/red]")
-            raise typer.Exit(1)
-        _AuditView(trace, record).run()
+        require_tui(AuditView, console)(trace, record).run()
         return
 
     console.print(

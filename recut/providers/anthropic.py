@@ -117,7 +117,7 @@ class AnthropicProvider(AbstractProvider):
         if response is None or not response.content:
             return
 
-        for step in _parse_response_to_steps(response, model=self.model):
+        for step in parse_response_to_steps(response, model=self.model):
             yield step
 
     async def replay_from(
@@ -144,7 +144,7 @@ class AnthropicProvider(AbstractProvider):
         return replayed
 
 
-def _parse_response_to_steps(response: Any, model: str = "unknown") -> list[RecutStep]:
+def parse_response_to_steps(response: Any, model: str = "unknown") -> list[RecutStep]:
     """Convert a messages.create() response into RecutStep objects."""
     usage = getattr(response, "usage", None)
     input_tokens = getattr(usage, "input_tokens", 0) if usage else 0

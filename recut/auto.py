@@ -33,7 +33,12 @@ from recut.utils import parse_float_env
 
 _log = logging.getLogger(__name__)
 
-_patched: set[str] = set()
+# provider name -> (patched class, original create method), used for uninstall()
+_originals: dict[str, tuple[type, Any]] = {}
+
+# Strong references so fire-and-forget capture tasks aren't garbage-collected
+# mid-flight (see asyncio.create_task docs).
+_bg_tasks: set[asyncio.Task] = set()
 
 
 def init(
@@ -57,92 +62,83 @@ def init(
     """
     _agent_id = agent_id or os.environ.get("RECUT_AGENT_ID", "auto")
     _mode = TraceMode(mode) if isinstance(mode, str) else mode
-    _patch_anthropic(_agent_id, _mode, sample_rate)
-    _patch_openai(_agent_id, _mode, sample_rate)
+    for provider, target_cls, response_attr in _patch_targets():
+        _install_wrapper(provider, target_cls, response_attr, _agent_id, _mode, sample_rate)
 
 
-def _patch_anthropic(agent_id: str, mode: TraceMode, sample_rate: float) -> None:
-    if "anthropic" in _patched:
-        return
+def uninstall() -> None:
+    """Restore the original SDK methods patched by init()."""
+    for target_cls, original in _originals.values():
+        target_cls.create = original  # type: ignore[attr-defined]
+    _originals.clear()
+
+
+def _patch_targets() -> list[tuple[str, type, str]]:
+    """Return (provider, class to patch, response attr that marks non-streaming)."""
+    targets: list[tuple[str, type, str]] = []
     try:
         from anthropic.resources.messages import AsyncMessages
+
+        targets.append(("anthropic", AsyncMessages, "content"))
     except ImportError:
-        return
-
-    original = AsyncMessages.create
-
-    @functools.wraps(original)
-    async def _wrapped(self: Any, *args: Any, **kwargs: Any) -> Any:
-        response = await original(self, *args, **kwargs)
-        effective_rate = parse_float_env("RECUT_DEFAULT_SAMPLE_RATE", sample_rate)
-        if random.random() <= effective_rate and hasattr(response, "content"):
-            asyncio.create_task(_capture_anthropic(response, kwargs, agent_id, mode))
-        return response
-
-    AsyncMessages.create = _wrapped  # type: ignore[method-assign]
-    _patched.add("anthropic")
-    _log.debug("recut: anthropic SDK patched for auto-capture")
-
-
-def _patch_openai(agent_id: str, mode: TraceMode, sample_rate: float) -> None:
-    if "openai" in _patched:
-        return
+        pass
     try:
         from openai.resources.chat.completions import AsyncCompletions
-    except ImportError:
-        return
 
-    original = AsyncCompletions.create
+        targets.append(("openai", AsyncCompletions, "choices"))
+    except ImportError:
+        pass
+    return targets
+
+
+def _install_wrapper(
+    provider: str,
+    target_cls: type,
+    response_attr: str,
+    agent_id: str,
+    mode: TraceMode,
+    sample_rate: float,
+) -> None:
+    if provider in _originals:
+        return
+    original = target_cls.create  # type: ignore[attr-defined]
 
     @functools.wraps(original)
     async def _wrapped(self: Any, *args: Any, **kwargs: Any) -> Any:
         response = await original(self, *args, **kwargs)
         effective_rate = parse_float_env("RECUT_DEFAULT_SAMPLE_RATE", sample_rate)
-        if random.random() <= effective_rate and hasattr(response, "choices"):
-            asyncio.create_task(_capture_openai(response, kwargs, agent_id, mode))
+        if random.random() <= effective_rate and hasattr(response, response_attr):
+            task = asyncio.create_task(_capture(response, kwargs, agent_id, mode, provider))
+            _bg_tasks.add(task)
+            task.add_done_callback(_bg_tasks.discard)
         return response
 
-    AsyncCompletions.create = _wrapped  # type: ignore[method-assign]
-    _patched.add("openai")
-    _log.debug("recut: openai SDK patched for auto-capture")
+    target_cls.create = _wrapped  # type: ignore[attr-defined]
+    _originals[provider] = (target_cls, original)
+    _log.debug("recut: %s SDK patched for auto-capture", provider)
 
 
-async def _capture_anthropic(
+async def _capture(
     response: Any,
     kwargs: dict,
     agent_id: str,
     mode: TraceMode,
+    provider: str,
 ) -> None:
     try:
-        from recut.providers.anthropic import _parse_response_to_steps
+        if provider == "anthropic":
+            from recut.providers.anthropic import parse_response_to_steps as parse_fn
+        else:
+            from recut.providers.openai import parse_response_to_steps as parse_fn
 
         model = str(kwargs.get("model") or getattr(response, "model", "unknown"))
-        steps = _parse_response_to_steps(response, model=model)
+        steps = parse_fn(response, model=model)
         if not steps:
             return
-        trace_obj = _build_trace(agent_id, mode, model, "anthropic", kwargs, steps)
+        trace_obj = _build_trace(agent_id, mode, model, provider, kwargs, steps)
         await write_queue.enqueue(_persist_trace(trace_obj))
     except Exception as exc:
-        _log.debug("recut: anthropic auto-capture error: %s", exc)
-
-
-async def _capture_openai(
-    response: Any,
-    kwargs: dict,
-    agent_id: str,
-    mode: TraceMode,
-) -> None:
-    try:
-        from recut.providers.openai import _parse_openai_response_to_steps
-
-        model = str(kwargs.get("model") or getattr(response, "model", "unknown"))
-        steps = _parse_openai_response_to_steps(response, model=model)
-        if not steps:
-            return
-        trace_obj = _build_trace(agent_id, mode, model, "openai", kwargs, steps)
-        await write_queue.enqueue(_persist_trace(trace_obj))
-    except Exception as exc:
-        _log.debug("recut: openai auto-capture error: %s", exc)
+        _log.debug("recut: %s auto-capture error: %s", provider, exc)
 
 
 def _build_trace(

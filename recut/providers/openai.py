@@ -106,7 +106,7 @@ class OpenAIProvider(AbstractProvider):
             kwargs["tools"] = tools
 
         response = await self._client.chat.completions.create(**kwargs)
-        for step in _parse_openai_response_to_steps(response, model=self.model):
+        for step in parse_response_to_steps(response, model=self.model):
             if self.infer_reasoning and step.type != StepType.REASONING:
                 step.reasoning = await self._infer_reasoning(step.content)
             yield step
@@ -127,7 +127,7 @@ class OpenAIProvider(AbstractProvider):
         return replayed
 
 
-def _parse_openai_response_to_steps(response: Any, model: str = "unknown") -> list[RecutStep]:
+def parse_response_to_steps(response: Any, model: str = "unknown") -> list[RecutStep]:
     """Convert a chat.completions.create() response into RecutStep objects (no inferred reasoning)."""
     if not getattr(response, "choices", None):
         return []

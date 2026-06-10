@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import recut
-from recut.auto import _extract_prompt, _patched, init
+from recut.auto import _extract_prompt, init, uninstall
 
 
 class TestExtractPrompt:
@@ -55,12 +55,10 @@ class TestExtractPrompt:
 
 class TestInitPatching:
     def setup_method(self):
-        _patched.discard("anthropic")
-        _patched.discard("openai")
+        uninstall()
 
     def teardown_method(self):
-        _patched.discard("anthropic")
-        _patched.discard("openai")
+        uninstall()
 
     def test_init_patches_anthropic(self):
         from anthropic.resources.messages import AsyncMessages
@@ -68,7 +66,6 @@ class TestInitPatching:
         original = AsyncMessages.create
         init(agent_id="test")
         assert AsyncMessages.create is not original
-        AsyncMessages.create = original  # restore
 
     def test_init_patches_openai(self):
         from openai.resources.chat.completions import AsyncCompletions
@@ -76,34 +73,28 @@ class TestInitPatching:
         original = AsyncCompletions.create
         init(agent_id="test")
         assert AsyncCompletions.create is not original
-        AsyncCompletions.create = original  # restore
 
     def test_init_idempotent(self):
         from anthropic.resources.messages import AsyncMessages
 
-        original = AsyncMessages.create
         init(agent_id="test")
         patched_once = AsyncMessages.create
         init(agent_id="test")  # second call — must not double-wrap
         assert AsyncMessages.create is patched_once
-        AsyncMessages.create = original  # restore
 
-    async def test_patched_create_returns_original_response(self):
+    def test_uninstall_restores_originals(self):
         from anthropic.resources.messages import AsyncMessages
+        from openai.resources.chat.completions import AsyncCompletions
 
-        original = AsyncMessages.create
+        anthropic_original = AsyncMessages.create
+        openai_original = AsyncCompletions.create
         init(agent_id="test")
-
-        fake_response = MagicMock()
-        fake_response.content = []  # empty → no capture task
-
-        with patch.object(AsyncMessages, "_recut_original", create=True):
-            pass  # just verify the patch path works
-
-        AsyncMessages.create = original
+        uninstall()
+        assert AsyncMessages.create is anthropic_original
+        assert AsyncCompletions.create is openai_original
 
     async def test_auto_capture_creates_trace(self):
-        from recut.auto import _capture_anthropic
+        from recut.auto import _capture
         from recut.schema.trace import TraceMode
 
         fake_response = MagicMock()
@@ -113,27 +104,28 @@ class TestInitPatching:
         with (
             patch("recut.auto.write_queue.enqueue", new=AsyncMock()) as mock_enqueue,
             patch(
-                "recut.providers.anthropic._parse_response_to_steps",
+                "recut.providers.anthropic.parse_response_to_steps",
                 return_value=[MagicMock()],
             ),
             patch("recut.auto._persist_trace", new=AsyncMock()),
         ):
-            await _capture_anthropic(
+            await _capture(
                 fake_response,
                 {"model": "claude-opus-4-8", "messages": [{"role": "user", "content": "hi"}]},
                 "my-agent",
                 TraceMode.PEEK,
+                "anthropic",
             )
         mock_enqueue.assert_called_once()
 
     async def test_auto_capture_silent_on_error(self):
-        from recut.auto import _capture_anthropic
+        from recut.auto import _capture
         from recut.schema.trace import TraceMode
 
         fake_response = MagicMock(spec=[])  # no .content — triggers error path
 
         # Must not raise
-        await _capture_anthropic(fake_response, {}, "agent", TraceMode.PEEK)
+        await _capture(fake_response, {}, "agent", TraceMode.PEEK, "anthropic")
 
     def test_init_exposed_on_recut(self):
         assert callable(recut.init)

@@ -6,10 +6,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-try:
-    from recut.cli.tui.peek_view import PeekView as _PeekView
-except ImportError:
-    _PeekView = None  # type: ignore[assignment,misc]
+from recut.cli.tui import PeekView, require_tui
 from recut.core.auditor import peek
 from recut.providers._pricing import format_cost
 from recut.schema.trace import FlagSource, Severity
@@ -46,10 +43,7 @@ async def _peek_async(trace_id: str, *, tui: bool = False) -> None:
     record = await peek(trace)
 
     if tui:
-        if _PeekView is None:
-            console.print("[red]TUI requires: pip install 'recut-ai[tui]'[/red]")
-            raise typer.Exit(1)
-        _PeekView(trace, record).run()
+        require_tui(PeekView, console)(trace, record).run()
         return
 
     console.print(f"\n[bold]Peek:[/bold] {record.behavioral_summary}")
