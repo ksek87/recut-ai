@@ -6,7 +6,7 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
-from recut.cli.tui.audit_view import AuditView
+from recut.cli.tui import AuditView, require_tui
 from recut.core.auditor import audit
 from recut.storage.db import StorageClient
 
@@ -33,7 +33,7 @@ async def _audit_async(trace_id: str, *, tui: bool = False) -> None:
     record = await audit(trace)
 
     if tui:
-        AuditView(trace, record).run()
+        require_tui(AuditView, console)(trace, record).run()
         return
 
     console.print(

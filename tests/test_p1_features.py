@@ -229,6 +229,7 @@ class TestFlagSourceLabels:
             assert source in _SOURCE_LABEL, f"Missing label for {source}"
 
     def test_tui_label_map_covers_all_sources(self) -> None:
+        pytest.importorskip("textual", reason="requires recut-ai[tui]")
         from recut.cli.tui.audit_view import _SOURCE_LABEL as TUI_LABELS
 
         for source in FlagSource:

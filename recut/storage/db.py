@@ -8,7 +8,13 @@ from pathlib import Path
 from sqlmodel import Session, SQLModel, col, create_engine, select
 
 from recut.schema.trace import RecutStep, RecutTrace, TraceLanguage, TraceMeta, TraceMode
-from recut.storage.models import AuditRow, FlagCache, ForkRow, TraceRow  # noqa: F401
+from recut.storage.models import (  # noqa: F401
+    AuditRow,
+    BaselineRow,
+    FlagCache,
+    ForkRow,
+    TraceRow,
+)
 
 _engine = None
 
@@ -93,6 +99,15 @@ class StorageClient:
     def get_fork_row(self, fork_id: str) -> ForkRow | None:
         with self._get_session() as session:
             return session.get(ForkRow, fork_id)
+
+    def save_baseline(self, agent_id: str, trace_id: str) -> None:
+        with self._get_session() as session:
+            session.merge(BaselineRow(agent_id=agent_id, trace_id=trace_id))
+            session.commit()
+
+    def get_baseline(self, agent_id: str) -> BaselineRow | None:
+        with self._get_session() as session:
+            return session.get(BaselineRow, agent_id)
 
     def get_cached_flags(self, content_hash: str) -> FlagCache | None:
         with self._get_session() as session:

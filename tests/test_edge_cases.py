@@ -9,8 +9,8 @@ import logging
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import click
 import pytest
+import typer
 from pydantic import ValidationError
 
 from recut.core.tracer import RecutContext, trace
@@ -353,7 +353,7 @@ class TestReplayCmdBoundsCheck:
 
         with (
             patch("recut.storage.db.StorageClient", return_value=mock_client),
-            pytest.raises(click.exceptions.Exit) as exc_info,
+            pytest.raises(typer.Exit) as exc_info,
         ):
             await _replay_async("trace-id-123", step_index, '{"injected_content": "x"}')
 
@@ -388,7 +388,7 @@ class TestCLIInvalidTraceID:
 
         with (
             patch("recut.storage.db.StorageClient", return_value=mock_client),
-            pytest.raises(click.exceptions.Exit) as exc_info,
+            pytest.raises(typer.Exit) as exc_info,
         ):
             await fn(*args)
 
@@ -412,7 +412,7 @@ class TestCLIInvalidTraceID:
 
         with (
             patch("recut.storage.db.StorageClient", return_value=mock_client),
-            pytest.raises(click.exceptions.Exit) as exc_info,
+            pytest.raises(typer.Exit) as exc_info,
         ):
             await _replay_async("trace-id", 0, "not-valid-json")
 

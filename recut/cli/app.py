@@ -15,6 +15,7 @@ console = Console()
 
 from recut.cli.commands import (  # noqa: E402
     audit_cmd,
+    check_cmd,
     export_cmd,
     intercept,
     peek_cmd,
@@ -29,6 +30,7 @@ app.add_typer(replay_cmd.app, name="replay")
 app.add_typer(peek_cmd.app, name="peek")
 app.add_typer(audit_cmd.app, name="audit")
 app.add_typer(stress_cmd.app, name="stress")
+app.add_typer(check_cmd.app, name="check")
 app.add_typer(export_cmd.app, name="export")
 
 

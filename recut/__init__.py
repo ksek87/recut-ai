@@ -1,20 +1,23 @@
 """
-recut-ai — Intercept, replay, and audit your AI agent runs.
+recut-ai — Regression testing, replay, and counterfactual debugging for AI agents.
 
-Quick start::
+Zero-change instrumentation::
 
     import recut
+    recut.init(agent_id="my-service")  # patches anthropic + openai SDKs
+
+    with recut.run() as run_id:
+        # Your existing agent code — completely unchanged.
+        # All LLM calls inside this block are grouped into one trace.
+        ...
+
+Decorator form (full control)::
 
     @recut.trace(agent_id="my-agent", mode="peek")
     async def run_agent(prompt: str, ctx=None) -> str:
         async for step in ctx.provider.run_agent(prompt):
             ctx.add_step(step)
         return ctx.trace.steps[-1].content if ctx.trace.steps else ""
-
-    # Or use the context manager form:
-    async with recut.trace_context(agent_id="my-agent") as ctx:
-        async for step in provider.run_agent(prompt):
-            ctx.add_step(step)
 """
 
 from __future__ import annotations
@@ -22,6 +25,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from recut import hooks as _hooks
+from recut.auto import init, run
 from recut.core.auditor import audit, peek
 from recut.core.interceptor import InterceptSession, intercept
 from recut.core.replayer import diff, replay
@@ -64,6 +68,8 @@ def get_flag_handlers() -> list[Callable]:
 
 
 __all__ = [
+    "init",
+    "run",
     "trace",
     "trace_context",
     "RecutContext",
@@ -85,4 +91,4 @@ __all__ = [
     "TraceLanguage",
 ]
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"

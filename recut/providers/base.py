@@ -23,8 +23,13 @@ class AbstractProvider(ABC):
         steps: list[RecutStep],
         fork_index: int,
         injection: dict,
+        prompt: str = "",
     ) -> list[RecutStep]:
-        """Re-run agent from fork_index with injected content."""
+        """Re-run agent from fork_index with injected content.
+
+        ``prompt`` is the original user prompt that started the trace, so
+        providers can reconstruct the full conversation as context.
+        """
         ...
 
     @abstractmethod

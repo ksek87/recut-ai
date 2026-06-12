@@ -8,7 +8,7 @@ from recut.schema.fork import RecutFork
 from recut.schema.trace import RecutStep, RecutTrace
 
 
-class DiffView(App):
+class DiffView(App):  # type: ignore[misc]
     """Side-by-side view comparing original trace steps vs forked replay."""
 
     TITLE = "recut diff"

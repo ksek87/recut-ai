@@ -6,7 +6,7 @@ import json
 import typer
 from rich.console import Console
 
-from recut.cli.tui.diff_view import DiffView
+from recut.cli.tui import DiffView, require_tui
 from recut.core.replayer import replay
 from recut.providers.anthropic import AnthropicProvider
 from recut.schema.fork import ForkInjection, InjectionTarget
@@ -63,7 +63,7 @@ async def _replay_async(
     )
 
     if tui:
-        DiffView(trace, fork).run()
+        require_tui(DiffView, console)(trace, fork).run()
         return
 
     console.print(f"\n[green]Fork created:[/green] {fork.id}")

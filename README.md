@@ -1,8 +1,8 @@
-# recut — AI Agent Observability, Debugging & Replay for Python
+# recut — Regression Testing, Replay & Counterfactual Debugging for AI Agents
 
-**Production-grade observability for AI agents.** One decorator gives you mid-flight interception, counterfactual replay, behavioral flagging, and full audit trails — for Claude, OpenAI, LangChain, LangGraph, and CrewAI agents.
+**Test your agent's behavior the way you test your code.** Trace runs locally, replay any trace from the step it went wrong with different context, and fail CI when behavior regresses. No server, no SaaS, no dashboard to host — `pip install`, a SQLite file, and a CLI.
 
-```python
+```bash
 pip install recut-ai
 ```
 
@@ -11,52 +11,69 @@ pip install recut-ai
 
 ---
 
-## Why recut?
+## The problem
 
-When an AI agent fails in production, there is no replay. You see the final output — or the bill — but not **why** it went wrong, **when** it started drifting, or what would have happened if step 4 had returned a different result.
+AI agents fail silently and expensively. One Claude Code sub-agent burned 27M tokens in a single run. Another executed `DROP DATABASE` after a sequence of individually-reasonable decisions. A third looped on the same tool call 50,000 times before anyone noticed.
 
-recut gives you that replay button. Wrap any async agent with one decorator and get five primitives:
-
-| Primitive | What it does |
-|---|---|
-| `peek` | Triage a completed trace — surfaces high-risk steps only |
-| `intercept` | Pause a live agent mid-run when a behavioral flag fires |
-| `replay` | Fork from any step and inject different context |
-| `audit` | Full structured audit with four flagging layers + LLM judge |
-| `stress` | Auto-generate adversarial variants from flagged steps |
-
-Built for engineers, AI engineers, PMs, and compliance teams. No ML background required.
+Observability dashboards show you these failures *after* they happen. What's missing is a test harness: a way to replay the exact trajectory with different context ("what if the tool had returned X?"), stress-test it with adversarial variants, and gate your CI on the result — so the regression never ships.
 
 ---
 
-## Install
+## Quick start — zero-change instrumentation
 
-```bash
-pip install recut-ai
+Add one line. recut patches the Anthropic and OpenAI SDKs automatically — **no changes to your agent code**:
+
+```python
+import recut
+recut.init(agent_id="my-service")   # patches anthropic + openai SDKs
+
+with recut.run() as run_id:
+    # Your existing agent code runs completely unchanged.
+    # Every LLM call inside this block is grouped into one trace.
+    client = anthropic.AsyncAnthropic()
+    response = await client.messages.create(
+        model="claude-opus-4-8",
+        messages=[{"role": "user", "content": prompt}],
+    )
 ```
 
-Framework adapters (optional):
+The whole run is captured as one multi-step trace. Inspect it, then gate on it:
 
 ```bash
-pip install recut-langchain    # LangChain + LangSmith enrichment
-pip install recut-langgraph    # LangGraph native interrupt/replay
-pip install recut-crewai       # CrewAI before/after hooks
-pip install recut-otel         # OpenTelemetry adapter (AutoGen, Semantic Kernel, Datadog, Phoenix)
-pip install recut-langfuse     # Langfuse behavioral scoring
+recut peek <run-id>             # triage — surfaces high-risk steps only
+recut audit <run-id>            # full structured audit
+recut check --agent my-service  # CI gate — exit 1 if behavior regressed
 ```
 
-```bash
-cp .env.example .env  # add ANTHROPIC_API_KEY or OPENAI_API_KEY
-```
+(Without `recut.run()`, each LLM call is captured as its own single-step trace.)
 
 ---
 
-## Quick Start
+## Gate your CI on agent behavior
+
+`recut check` compares the most recent trace against a stored baseline and exits non-zero on regression — flag rate, high-severity flags, cost spikes, or step-repetition loops:
+
+```yaml
+# .github/workflows/agent-ci.yml
+- run: python run_agent_smoke_test.py   # traced via recut.init()
+- run: recut check --agent my-service   # fails the build on behavioral regression
+```
+
+The first run stores a baseline automatically. Thresholds are env-configurable (`RECUT_CHECK_MAX_FLAG_RATE`, `RECUT_CHECK_MAX_COST_DELTA`, `RECUT_CHECK_MAX_REPETITION`).
+
+---
+
+## Or use the decorator for full control
 
 ```python
 import recut
 
-@recut.trace(agent_id="my-agent", mode="peek")
+@recut.trace(
+    agent_id="my-agent",
+    token_budget=0.10,       # hard stop at $0.10
+    budget_hard_limit=True,  # raises RecutBudgetExceededError if exceeded
+    flagging_depth="fast",   # layers 1-3, instant, zero model cost
+)
 async def run_agent(prompt: str, ctx=None) -> str:
     async for step in ctx.provider.run_agent(prompt):
         ctx.add_step(step)
@@ -67,27 +84,18 @@ def handle_flag(event: recut.RecutFlagEvent):
     print(f"[{event.flag.severity}] {event.flag.plain_reason}")
 ```
 
-### Budget guardrails
+---
 
-Stop an agent that's burning tokens:
+## Install
 
-```python
-@recut.trace(
-    agent_id="my-agent",
-    token_budget=0.10,        # hard stop at $0.10
-    budget_hard_limit=True,
-)
-async def run_agent(prompt: str, ctx=None) -> str:
-    ...
+```bash
+pip install recut-ai              # core
+pip install "recut-ai[embeddings]"  # + goal-drift detection via sentence-transformers
+pip install "recut-ai[tui]"         # + interactive TUI (requires textual)
 ```
 
-### Inline flagging
-
-Score every run immediately without a background job:
-
-```python
-@recut.trace(agent_id="my-agent", flagging_depth="fast")   # layers 1-3, instant
-@recut.trace(agent_id="my-agent", flagging_depth="full")   # all layers + LLM judge
+```bash
+cp .env.example .env   # add ANTHROPIC_API_KEY or OPENAI_API_KEY
 ```
 
 ---
@@ -98,12 +106,26 @@ Score every run immediately without a background job:
 recut run "prompt"                     # run and trace in peek mode
 recut peek   <trace-id>                # triage — surfaces high-risk steps only
 recut audit  <trace-id>                # full structured audit pass
+recut check  --agent <id>              # CI regression gate — exit 1 on behavioral regression
 recut intercept "prompt"               # pause mid-run when a high-severity flag fires
 recut replay <trace-id> --step 4       # fork from step 4, inject different context
 recut diff   <trace-id> <fork-id>      # side-by-side behavioral diff
 recut stress <trace-id> --variants 5   # stress-test with auto-generated adversarial variants
 recut export <trace-id>                # export trace to .recut.json
 ```
+
+---
+
+## Primitives
+
+| Primitive | What it does |
+|---|---|
+| `peek` | Fast triage — surfaces only the highest-risk steps |
+| `intercept` | Pause a live agent mid-run the moment a behavioral flag fires |
+| `replay` | Fork from any step, inject different context, run forward with full conversation history |
+| `audit` | Full structured audit with four flagging layers + LLM judge |
+| `stress` | Auto-generate adversarial variants from flagged steps |
+| `check` | CI regression gate — compare against a baseline, exit non-zero on regression |
 
 ---
 
@@ -128,13 +150,13 @@ Every flag shows which detection layer fired it — `[rule]`, `[embedding]`, `[n
 
 ## Flagging Engine — Five Detection Layers
 
-Detection runs cheapest-first, so fast traces stay fast:
+Detection runs cheapest-first so fast traces stay fast:
 
-1. **Rule-based** — deterministic, instant, zero cost. Catches scope creep, tool abuse, and deviation from instructions without any model call.
+1. **Rule-based** — deterministic, instant, zero cost. Catches scope creep, tool loops, and instruction deviation without any model call.
 2. **Embedding similarity** — cosine distance from the original prompt catches goal drift. Uses `sentence-transformers` locally; no API call.
 3. **Native thinking analysis** — Claude-exclusive. Reads extended thinking blocks directly; detects reasoning-action mismatches that no other tool can see.
-4. **LLM judge** — defaults to a local model via any OpenAI-compatible runtime (Ollama, LM Studio, llama.cpp, vLLM). **No data leaves your machine, no API cost.** Set `RECUT_L4_BACKEND=anthropic|openai` for cloud judgment on ambiguous steps.
-5. **Behavioral fingerprinting** — after ~5 traces, builds a per-agent baseline from SQLite history and flags statistical deviations (step count, risk score) as `[fingerprint]`. Pure statistics, zero API calls.
+4. **LLM judge** — defaults to a local model via any OpenAI-compatible runtime (Ollama, LM Studio, llama.cpp, vLLM). **No data leaves your machine, no API cost.** Set `RECUT_L4_BACKEND=anthropic|openai` for cloud judgment.
+5. **Behavioral fingerprinting** — after ~5 traces, builds a per-agent baseline from SQLite history and flags statistical deviations (step count, risk score) as `[fingerprint]`. Pure math, zero API calls.
 
 Use `flagging_depth="fast"` for layers 1–3 only (instant, free). Use `"full"` to include the LLM judge.
 
@@ -142,9 +164,10 @@ Use `flagging_depth="fast"` for layers 1–3 only (instant, free). Use `"full"` 
 
 ## Configuration
 
-All behavior is configurable via environment variables — no config file needed:
+All behavior is configurable via environment variables:
 
 ```bash
+RECUT_AGENT_ID=my-service            # default agent_id for recut.init()
 RECUT_L4_BACKEND=local               # local (default, free) | anthropic | openai
 RECUT_L4_LOCAL_URL=http://localhost:11434/v1   # Ollama, LM Studio, vLLM, etc.
 RECUT_META_MODEL_ANTHROPIC=claude-haiku-4-5-20251001  # per-backend model override
@@ -161,25 +184,9 @@ See **[docs/configuration.md](docs/configuration.md)** for the full reference �
 
 ---
 
-## Framework Integrations
-
-recut enriches your existing observability stack — it does not replace it.
-
-**LangGraph** — recut's `intercept` mode maps directly onto LangGraph's `interrupt()` primitive. Pause on a high-severity flag, inspect the trace, then resume or redirect — all within the graph.
-
-**LangChain + LangSmith** — implements `BaseCallbackHandler`, capturing reasoning tokens and posting behavioral flags as LangSmith feedback records. See a `recut_flags` column in your existing LangSmith traces.
-
-**CrewAI** — synchronous before/after hooks that can block, making intercept mode available without LangGraph.
-
-**OpenTelemetry** (`recut-otel`) — a `SpanProcessor` that enriches any OTel-instrumented agent. One adapter works with AutoGen, Semantic Kernel, Arize Phoenix, Datadog, Honeycomb, and Grafana.
-
-**Langfuse** — posts `CATEGORICAL` and `NUMERIC` scores with a standardized `score_config` vocabulary. Turns Langfuse's scoring panel into a behavioral dashboard.
-
----
-
 ## Claude & OpenAI Support
 
-- **Claude** — native extended thinking block capture. recut reads the actual internal reasoning Claude produces, not a summary. This is the only tool that can detect reasoning-action mismatches at the model level.
+- **Claude** — native extended thinking block capture. recut reads the actual internal reasoning Claude produces before each action. The only tool that can detect reasoning-action mismatches at the model level.
 - **OpenAI** — inferred reasoning fallback; all other flagging layers apply.
 
 ---
@@ -191,5 +198,4 @@ Traces are stored locally in SQLite by default (zero external dependencies). Pos
 ---
 
 See [POSITIONING.md](docs/product/POSITIONING.md) for competitive landscape and use cases.  
-See [ROADMAP.md](docs/product/ROADMAP.md) for what's coming.  
-See [INTEGRATIONS.md](docs/product/INTEGRATIONS.md) for full adapter and platform integration detail.
+See [ROADMAP.md](docs/product/ROADMAP.md) for what's coming.
