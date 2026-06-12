@@ -54,6 +54,14 @@ class ForkRow(SQLModel, table=True):
     diff_json: str | None = None
 
 
+class BaselineRow(SQLModel, table=True):
+    __tablename__ = "baselines"
+
+    agent_id: str = Field(primary_key=True)
+    trace_id: str = Field(foreign_key="traces.id")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
 class FlagCache(SQLModel, table=True):
     __tablename__ = "flag_cache"
 

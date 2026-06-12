@@ -1,6 +1,6 @@
-# recut — AI Agent Observability, Debugging & Replay for Python
+# recut — Regression Testing, Replay & Counterfactual Debugging for AI Agents
 
-**Production-grade observability for AI agents.** Stop runaway costs, catch behavioral failures before they escalate, and replay any trace from the exact step it went wrong.
+**Test your agent's behavior the way you test your code.** Trace runs locally, replay any trace from the step it went wrong with different context, and fail CI when behavior regresses. No server, no SaaS, no dashboard to host — `pip install`, a SQLite file, and a CLI.
 
 ```bash
 pip install recut-ai
@@ -15,7 +15,7 @@ pip install recut-ai
 
 AI agents fail silently and expensively. One Claude Code sub-agent burned 27M tokens in a single run. Another executed `DROP DATABASE` after a sequence of individually-reasonable decisions. A third looped on the same tool call 50,000 times before anyone noticed.
 
-The common thread: no structured trace, no replay, and nothing to intercept the run before it does something irreversible.
+Observability dashboards show you these failures *after* they happen. What's missing is a test harness: a way to replay the exact trajectory with different context ("what if the tool had returned X?"), stress-test it with adversarial variants, and gate your CI on the result — so the regression never ships.
 
 ---
 
@@ -27,20 +27,39 @@ Add one line. recut patches the Anthropic and OpenAI SDKs automatically — **no
 import recut
 recut.init(agent_id="my-service")   # patches anthropic + openai SDKs
 
-# Your existing agent code runs completely unchanged:
-client = anthropic.AsyncAnthropic()
-response = await client.messages.create(
-    model="claude-opus-4-8",
-    messages=[{"role": "user", "content": prompt}],
-)
+with recut.run() as run_id:
+    # Your existing agent code runs completely unchanged.
+    # Every LLM call inside this block is grouped into one trace.
+    client = anthropic.AsyncAnthropic()
+    response = await client.messages.create(
+        model="claude-opus-4-8",
+        messages=[{"role": "user", "content": prompt}],
+    )
 ```
 
-Every call is now captured as a recut trace. View it in the CLI:
+The whole run is captured as one multi-step trace. Inspect it, then gate on it:
 
 ```bash
-recut peek <trace-id>     # triage — surfaces high-risk steps only
-recut audit <trace-id>    # full structured audit
+recut peek <run-id>             # triage — surfaces high-risk steps only
+recut audit <run-id>            # full structured audit
+recut check --agent my-service  # CI gate — exit 1 if behavior regressed
 ```
+
+(Without `recut.run()`, each LLM call is captured as its own single-step trace.)
+
+---
+
+## Gate your CI on agent behavior
+
+`recut check` compares the most recent trace against a stored baseline and exits non-zero on regression — flag rate, high-severity flags, cost spikes, or step-repetition loops:
+
+```yaml
+# .github/workflows/agent-ci.yml
+- run: python run_agent_smoke_test.py   # traced via recut.init()
+- run: recut check --agent my-service   # fails the build on behavioral regression
+```
+
+The first run stores a baseline automatically. Thresholds are env-configurable (`RECUT_CHECK_MAX_FLAG_RATE`, `RECUT_CHECK_MAX_COST_DELTA`, `RECUT_CHECK_MAX_REPETITION`).
 
 ---
 
@@ -87,6 +106,7 @@ cp .env.example .env   # add ANTHROPIC_API_KEY or OPENAI_API_KEY
 recut run "prompt"                     # run and trace in peek mode
 recut peek   <trace-id>                # triage — surfaces high-risk steps only
 recut audit  <trace-id>                # full structured audit pass
+recut check  --agent <id>              # CI regression gate — exit 1 on behavioral regression
 recut intercept "prompt"               # pause mid-run when a high-severity flag fires
 recut replay <trace-id> --step 4       # fork from step 4, inject different context
 recut diff   <trace-id> <fork-id>      # side-by-side behavioral diff
@@ -102,9 +122,10 @@ recut export <trace-id>                # export trace to .recut.json
 |---|---|
 | `peek` | Fast triage — surfaces only the highest-risk steps |
 | `intercept` | Pause a live agent mid-run the moment a behavioral flag fires |
-| `replay` | Fork from any step, inject different context, run forward |
+| `replay` | Fork from any step, inject different context, run forward with full conversation history |
 | `audit` | Full structured audit with four flagging layers + LLM judge |
 | `stress` | Auto-generate adversarial variants from flagged steps |
+| `check` | CI regression gate — compare against a baseline, exit non-zero on regression |
 
 ---
 

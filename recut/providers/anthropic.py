@@ -94,11 +94,17 @@ class AnthropicProvider(AbstractProvider):
         if tools:
             kwargs["tools"] = tools
 
-        response = None
+        response = await self._create_with_retry(kwargs)
+        if response is None or not response.content:
+            return
+
+        for step in parse_response_to_steps(response, model=self.model):
+            yield step
+
+    async def _create_with_retry(self, kwargs: dict) -> Any:
         for attempt in range(3):
             try:
-                response = await self._client.messages.create(**kwargs)
-                break
+                return await self._client.messages.create(**kwargs)
             except anthropic.AuthenticationError as exc:
                 raise RuntimeError(
                     "ANTHROPIC_API_KEY is missing or invalid — set the environment variable and retry."
@@ -113,34 +119,38 @@ class AnthropicProvider(AbstractProvider):
                     await asyncio.sleep(2**attempt)
                 else:
                     raise
-
-        if response is None or not response.content:
-            return
-
-        for step in parse_response_to_steps(response, model=self.model):
-            yield step
+        return None
 
     async def replay_from(
         self,
         steps: list[RecutStep],
         fork_index: int,
         injection: dict,
+        prompt: str = "",
     ) -> list[RecutStep]:
         """
-        Reconstruct messages up to fork_index, inject modified content,
-        then continue the run from that point.
+        Rebuild the full conversation up to and including the fork step
+        (with the injection applied), then continue the run with that
+        history as context.
         """
-        messages = _steps_to_messages(steps[:fork_index], injection)
-        prompt = messages[-1]["content"] if messages else ""
+        history = steps[: fork_index + 1]
+        messages = _steps_to_messages(history, injection, prompt=prompt)
+        if not messages or messages[-1]["role"] == "assistant":
+            messages.append({"role": "user", "content": "Continue from this point."})
 
-        replayed: list[RecutStep] = []
-        base_index = fork_index
+        kwargs: dict = {
+            "model": self.model,
+            "max_tokens": 16_000,
+            "thinking": {"type": "enabled", "budget_tokens": self.thinking_budget},
+            "messages": messages,
+        }
+        response = await self._create_with_retry(kwargs)
+        if response is None or not response.content:
+            return []
 
-        async for step in self.run_agent(prompt):
-            step.index = base_index
-            replayed.append(step)
-            base_index += 1
-
+        replayed = parse_response_to_steps(response, model=self.model)
+        for offset, step in enumerate(replayed):
+            step.index = fork_index + offset
         return replayed
 
 
@@ -214,46 +224,75 @@ def parse_response_to_steps(response: Any, model: str = "unknown") -> list[Recut
     return steps
 
 
-def _steps_to_messages(steps: list[RecutStep], injection: dict) -> list[dict]:
-    """Convert stored steps back into the messages[] format for replay."""
+def _steps_to_messages(steps: list[RecutStep], injection: dict, prompt: str = "") -> list[dict]:
+    """
+    Convert stored steps back into valid Anthropic messages[] for replay.
+
+    Starts from the original user prompt, pairs each tool_result with the
+    preceding tool_use id, applies the injection to the step whose content
+    matches the injection's original_content, and merges consecutive
+    same-role messages so the history satisfies strict role alternation.
+    """
     messages: list[dict] = []
+    pending_tool_use_id: str | None = None
+
+    def _as_blocks(content: str | list) -> list:
+        return [{"type": "text", "text": content}] if isinstance(content, str) else content
+
+    def _append(role: str, content: str | list) -> None:
+        if messages and messages[-1]["role"] == role:
+            merged = _as_blocks(messages[-1]["content"])
+            merged.extend(_as_blocks(content))
+            messages[-1]["content"] = merged
+        else:
+            messages.append({"role": role, "content": content})
+
+    def _injected(step: RecutStep) -> str:
+        original = injection.get("original_content")
+        if injection.get("target") == "tool_result" and (
+            original is None or step.content == original
+        ):
+            return str(injection.get("injected_content", step.content))
+        return step.content
+
+    if prompt:
+        _append("user", prompt)
+
     for step in steps:
         if step.type == StepType.TOOL_CALL:
             try:
                 data = json.loads(step.content)
             except Exception:
                 data = {"name": "unknown", "input": step.content}
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": [
-                        {
-                            "type": "tool_use",
-                            "name": data.get("name"),
-                            "input": data.get("input", {}),
-                            "id": str(uuid.uuid4()),
-                        }
-                    ],
-                }
+            pending_tool_use_id = str(uuid.uuid4())
+            _append(
+                "assistant",
+                [
+                    {
+                        "type": "tool_use",
+                        "name": data.get("name"),
+                        "input": data.get("input", {}),
+                        "id": pending_tool_use_id,
+                    }
+                ],
             )
         elif step.type == StepType.TOOL_RESULT:
-            content = (
-                injection.get("injected_content", step.content)
-                if injection.get("target") == "tool_result"
-                else step.content
-            )
-            messages.append(
-                {
-                    "role": "user",
-                    "content": [{"type": "tool_result", "content": content}],
-                }
-            )
+            content = _injected(step)
+            if pending_tool_use_id:
+                _append(
+                    "user",
+                    [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": pending_tool_use_id,
+                            "content": content,
+                        }
+                    ],
+                )
+                pending_tool_use_id = None
+            else:
+                _append("user", content)
         elif step.type == StepType.OUTPUT:
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": step.content,
-                }
-            )
+            _append("assistant", step.content)
 
     return messages

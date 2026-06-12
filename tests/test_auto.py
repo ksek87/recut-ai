@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import recut
-from recut.auto import _extract_prompt, init, uninstall
+from recut.auto import _extract_prompt, init, run, uninstall
 
 
 class TestExtractPrompt:
@@ -129,3 +129,59 @@ class TestInitPatching:
 
     def test_init_exposed_on_recut(self):
         assert callable(recut.init)
+        assert callable(recut.run)
+
+
+class TestRunGrouping:
+    def setup_method(self):
+        uninstall()
+
+    def teardown_method(self):
+        uninstall()
+
+    @staticmethod
+    def _fake_response(text: str) -> MagicMock:
+        response = MagicMock()
+        response.usage = None
+        response.content = [MagicMock(type="text", text=text)]
+        return response
+
+    async def test_captures_inside_run_share_one_trace(self):
+        from recut.auto import _capture
+        from recut.schema.trace import TraceMode
+
+        kwargs = {"model": "m", "messages": [{"role": "user", "content": "hi"}]}
+        with (
+            patch("recut.auto.write_queue.enqueue", new=AsyncMock()),
+            patch("recut.auto._persist_trace", new=MagicMock()) as persist,
+            run() as rid,
+        ):
+            await _capture(self._fake_response("one"), kwargs, "a", TraceMode.PEEK, "anthropic")
+            await _capture(self._fake_response("two"), kwargs, "a", TraceMode.PEEK, "anthropic")
+
+        first, second = (c.args[0] for c in persist.call_args_list)
+        assert first is second
+        assert first.id == rid
+        assert [s.content for s in first.steps] == ["one", "two"]
+        assert [s.index for s in first.steps] == [0, 1]
+        assert first.meta.total_steps == 2
+
+    async def test_captures_outside_run_get_separate_traces(self):
+        from recut.auto import _capture
+        from recut.schema.trace import TraceMode
+
+        kwargs = {"model": "m", "messages": [{"role": "user", "content": "hi"}]}
+        with (
+            patch("recut.auto.write_queue.enqueue", new=AsyncMock()),
+            patch("recut.auto._persist_trace", new=MagicMock()) as persist,
+        ):
+            await _capture(self._fake_response("one"), kwargs, "a", TraceMode.PEEK, "anthropic")
+            await _capture(self._fake_response("two"), kwargs, "a", TraceMode.PEEK, "anthropic")
+
+        first, second = (c.args[0] for c in persist.call_args_list)
+        assert first is not second
+        assert first.id != second.id
+
+    def test_explicit_run_id_used_as_trace_id(self):
+        with run("my-run-42") as rid:
+            assert rid == "my-run-42"

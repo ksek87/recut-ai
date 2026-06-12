@@ -5,12 +5,12 @@ build-backend = "hatchling.build"
 [project]
 name = "recut-ai"
 version = "0.5.0"
-description = "AI agent observability — intercept, replay, and audit any run"
+description = "Regression testing, replay, and counterfactual debugging for AI agents"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
 authors = [{ name = "Keelin Sekerka" }]
-keywords = ["ai", "agent", "observability", "llm", "debugging", "anthropic", "tracing", "replay", "audit"]
+keywords = ["ai", "agent", "testing", "regression", "llm", "debugging", "anthropic", "tracing", "replay", "audit", "observability"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",

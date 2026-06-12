@@ -15,7 +15,7 @@ class _StubProvider:
         return False
 
     async def replay_from(
-        self, steps, fork_index, injection
+        self, steps, fork_index, injection, prompt=""
     ) -> list[RecutStep]:  # pragma: no cover
         raise NotImplementedError
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -116,14 +117,23 @@ class OpenAIProvider(AbstractProvider):
         steps: list[RecutStep],
         fork_index: int,
         injection: dict,
+        prompt: str = "",
     ) -> list[RecutStep]:
-        injected_prompt = injection.get("injected_content", "")
-        replayed: list[RecutStep] = []
-        base_index = fork_index
-        async for step in self.run_agent(injected_prompt):
-            step.index = base_index
-            replayed.append(step)
-            base_index += 1
+        """
+        Rebuild the full conversation up to and including the fork step
+        (with the injection applied), then continue the run with that
+        history as context.
+        """
+        history = steps[: fork_index + 1]
+        messages = _steps_to_chat_messages(history, injection, prompt=prompt)
+        if not messages or messages[-1]["role"] == "assistant":
+            messages.append({"role": "user", "content": "Continue from this point."})
+
+        kwargs: dict = {"model": self.model, "messages": messages}
+        response = await self._client.chat.completions.create(**kwargs)
+        replayed = parse_response_to_steps(response, model=self.model)
+        for offset, step in enumerate(replayed):
+            step.index = fork_index + offset
         return replayed
 
 
@@ -169,3 +179,65 @@ def parse_response_to_steps(response: Any, model: str = "unknown") -> list[Recut
         )
 
     return steps
+
+
+def _steps_to_chat_messages(
+    steps: list[RecutStep], injection: dict, prompt: str = ""
+) -> list[dict]:
+    """
+    Convert stored steps back into valid OpenAI chat messages for replay.
+
+    Starts from the original user prompt, pairs each tool message with the
+    preceding assistant tool_call id, and applies the injection to the step
+    whose content matches the injection's original_content.
+    """
+    messages: list[dict] = []
+    pending_tool_call_id: str | None = None
+
+    def _injected(step: RecutStep) -> str:
+        original = injection.get("original_content")
+        if injection.get("target") == "tool_result" and (
+            original is None or step.content == original
+        ):
+            return str(injection.get("injected_content", step.content))
+        return step.content
+
+    if prompt:
+        messages.append({"role": "user", "content": prompt})
+
+    for step in steps:
+        if step.type == StepType.TOOL_CALL:
+            try:
+                data = json.loads(step.content)
+            except Exception:
+                data = {"name": "unknown", "input": step.content}
+            arguments = data.get("input", "{}")
+            if not isinstance(arguments, str):
+                arguments = json.dumps(arguments)
+            pending_tool_call_id = str(uuid.uuid4())
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": pending_tool_call_id,
+                            "type": "function",
+                            "function": {"name": data.get("name"), "arguments": arguments},
+                        }
+                    ],
+                }
+            )
+        elif step.type == StepType.TOOL_RESULT:
+            content = _injected(step)
+            if pending_tool_call_id:
+                messages.append(
+                    {"role": "tool", "tool_call_id": pending_tool_call_id, "content": content}
+                )
+                pending_tool_call_id = None
+            else:
+                messages.append({"role": "user", "content": content})
+        elif step.type == StepType.OUTPUT:
+            messages.append({"role": "assistant", "content": step.content})
+
+    return messages

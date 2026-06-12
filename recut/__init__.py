@@ -1,12 +1,15 @@
 """
-recut-ai — Intercept, replay, and audit your AI agent runs.
+recut-ai — Regression testing, replay, and counterfactual debugging for AI agents.
 
 Zero-change instrumentation::
 
     import recut
     recut.init(agent_id="my-service")  # patches anthropic + openai SDKs
 
-    # Your existing agent code — completely unchanged.
+    with recut.run() as run_id:
+        # Your existing agent code — completely unchanged.
+        # All LLM calls inside this block are grouped into one trace.
+        ...
 
 Decorator form (full control)::
 
@@ -22,7 +25,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from recut import hooks as _hooks
-from recut.auto import init
+from recut.auto import init, run
 from recut.core.auditor import audit, peek
 from recut.core.interceptor import InterceptSession, intercept
 from recut.core.replayer import diff, replay
@@ -66,6 +69,7 @@ def get_flag_handlers() -> list[Callable]:
 
 __all__ = [
     "init",
+    "run",
     "trace",
     "trace_context",
     "RecutContext",

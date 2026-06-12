@@ -34,6 +34,7 @@ async def replay(
         steps=trace.steps,
         fork_index=fork_step_index,
         injection=injection.model_dump(),
+        prompt=trace.prompt,
     )
 
     engine = FlaggingEngine(mode=trace.mode)
