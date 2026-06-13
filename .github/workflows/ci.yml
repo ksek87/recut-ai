@@ -70,7 +70,7 @@ jobs:
           cache: "pip"
 
       - name: Install package with dev extras
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,anthropic,openai]"
 
       - name: Run mypy
         run: mypy recut
@@ -93,7 +93,7 @@ jobs:
           cache: "pip"
 
       - name: Install package with dev extras
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,anthropic,openai]"
 
       - name: Run pytest with coverage
         run: |
