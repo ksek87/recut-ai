@@ -113,14 +113,9 @@ def run(run_id: str | None = None) -> Iterator[str]:
 
 def _patch_targets() -> list[tuple[str, type, str]]:
     """Return (provider, class to patch, response attr) from all registered providers."""
-    import contextlib
+    from recut.providers.registry import get_registered, load_providers
 
-    with contextlib.suppress(ImportError):
-        import recut.providers.anthropic  # noqa: F401
-    with contextlib.suppress(ImportError):
-        import recut.providers.openai  # noqa: F401
-    from recut.providers.registry import get_registered
-
+    load_providers()
     return [(name, *p.patch_target()) for name, p in get_registered().items()]
 
 
@@ -159,9 +154,9 @@ async def _capture(
     provider: str,
 ) -> None:
     try:
-        from recut.providers.registry import get_registered
+        from recut.providers.registry import get_provider
 
-        provider_instance = get_registered().get(provider)
+        provider_instance = get_provider(provider)
         if provider_instance is None:
             return
         model = str(kwargs.get("model") or getattr(response, "model", "unknown"))

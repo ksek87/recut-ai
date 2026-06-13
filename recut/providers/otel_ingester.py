@@ -19,13 +19,16 @@ duck typing — the ``opentelemetry`` package is not a hard dependency.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 
+from recut.core.tracer import _coerce_mode, _persist_trace
 from recut.schema.trace import RecutStep, RecutTrace, StepType, TraceLanguage, TraceMeta, TraceMode
+from recut.storage import write_queue
 
 _log = logging.getLogger(__name__)
+
+_MAX_INCOMPLETE_TRACES = 512
 
 _OPENINFERENCE_KIND_MAP: dict[str, StepType] = {
     "LLM": StepType.OUTPUT,
@@ -72,7 +75,7 @@ class RecutSpanProcessor:
         mode: TraceMode | str = TraceMode.PEEK,
     ) -> None:
         self._agent_id = agent_id
-        self._mode = TraceMode(mode) if isinstance(mode, str) else mode
+        self._mode = _coerce_mode(mode)
         self._traces: dict[int, list[Any]] = {}
 
     def on_start(self, span: Any, parent_context: Any = None) -> None:
@@ -86,6 +89,10 @@ class RecutSpanProcessor:
         trace_id = ctx.trace_id
         spans = self._traces.setdefault(trace_id, [])
         spans.append(span)
+
+        # Evict oldest incomplete trace if the buffer is full (e.g. root span never arrived)
+        if len(self._traces) > _MAX_INCOMPLETE_TRACES:
+            self._traces.pop(next(iter(self._traces)))
 
         parent = getattr(span, "parent", None)
         is_root = parent is None or not getattr(parent, "is_valid", True)
@@ -105,17 +112,13 @@ class RecutSpanProcessor:
         )
         trace_obj.steps.extend(steps)
         del self._traces[trace_id]
-        self._persist(trace_obj)
-
-    def _persist(self, trace_obj: RecutTrace) -> None:
-        from recut.core.tracer import _persist_trace
-
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.create_task(_persist_trace(trace_obj))
-            else:
-                loop.run_until_complete(_persist_trace(trace_obj))
+            import asyncio
+
+            asyncio.get_running_loop()
+            asyncio.create_task(write_queue.enqueue(_persist_trace(trace_obj)))
+        except RuntimeError:
+            _log.debug("recut: OTel ingester called outside async context — trace not persisted")
         except Exception as exc:
             _log.debug("recut: OTel ingester persist failed: %s", exc)
 
