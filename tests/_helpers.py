@@ -26,8 +26,12 @@ class _StubProvider:
     def patch_target(cls) -> tuple[type, str]:  # pragma: no cover
         raise NotImplementedError
 
-    def parse_response(self, response: object, model: str = "unknown") -> list[RecutStep]:  # pragma: no cover
+    def parse_response(
+        self, response: object, model: str = "unknown"
+    ) -> list[RecutStep]:  # pragma: no cover
         raise NotImplementedError
 
-    def build_messages(self, steps: list, injection: dict, prompt: str = "") -> list[dict]:  # pragma: no cover
+    def build_messages(
+        self, steps: list, injection: dict, prompt: str = ""
+    ) -> list[dict]:  # pragma: no cover
         raise NotImplementedError
