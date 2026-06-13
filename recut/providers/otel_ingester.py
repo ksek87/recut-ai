@@ -47,7 +47,7 @@ def _extract_content(span: Any) -> str:
     for key in _OPENINFERENCE_CONTENT_ATTRS:
         if key in attrs:
             return str(attrs[key])
-    return span.name
+    return str(span.name)
 
 
 def _span_to_step(span: Any, index: int) -> RecutStep:

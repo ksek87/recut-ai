@@ -113,14 +113,12 @@ def run(run_id: str | None = None) -> Iterator[str]:
 
 def _patch_targets() -> list[tuple[str, type, str]]:
     """Return (provider, class to patch, response attr) from all registered providers."""
-    try:
+    import contextlib
+
+    with contextlib.suppress(ImportError):
         import recut.providers.anthropic  # noqa: F401
-    except ImportError:
-        pass
-    try:
+    with contextlib.suppress(ImportError):
         import recut.providers.openai  # noqa: F401
-    except ImportError:
-        pass
     from recut.providers.registry import get_registered
 
     return [(name, *p.patch_target()) for name, p in get_registered().items()]

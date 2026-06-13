@@ -246,14 +246,12 @@ def _extract_prompt(args: tuple, kwargs: dict) -> str:
 
 
 def _default_provider() -> AbstractProvider:
-    try:
+    import contextlib
+
+    with contextlib.suppress(ImportError):
         import recut.providers.anthropic  # noqa: F401
-    except ImportError:
-        pass
-    try:
+    with contextlib.suppress(ImportError):
         import recut.providers.openai  # noqa: F401
-    except ImportError:
-        pass
     from recut.providers.registry import get_registered
 
     registered = get_registered()
