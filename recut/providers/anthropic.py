@@ -12,6 +12,7 @@ import anthropic
 from recut.providers._pricing import ANTHROPIC_PRICING, resolve_cost
 from recut.providers._utils import get_api_timeout
 from recut.providers.base import AbstractProvider
+from recut.providers.registry import register
 from recut.schema.trace import (
     ReasoningSource,
     RecutStep,
@@ -36,10 +37,16 @@ class AnthropicProvider(AbstractProvider):
     ):
         self.model = model
         self.thinking_budget = thinking_budget
-        self._client = anthropic.AsyncAnthropic(
-            api_key=api_key or os.environ.get("ANTHROPIC_API_KEY"),
-            timeout=get_api_timeout(),
-        )
+        self._api_key = api_key
+        self._client: anthropic.AsyncAnthropic | None = None
+
+    def _get_client(self) -> anthropic.AsyncAnthropic:
+        if self._client is None:
+            self._client = anthropic.AsyncAnthropic(
+                api_key=self._api_key or os.environ.get("ANTHROPIC_API_KEY"),
+                timeout=get_api_timeout(),
+            )
+        return self._client
 
     def supports_native_reasoning(self) -> bool:
         return True
@@ -104,7 +111,7 @@ class AnthropicProvider(AbstractProvider):
     async def _create_with_retry(self, kwargs: dict) -> Any:
         for attempt in range(3):
             try:
-                return await self._client.messages.create(**kwargs)
+                return await self._get_client().messages.create(**kwargs)
             except anthropic.AuthenticationError as exc:
                 raise RuntimeError(
                     "ANTHROPIC_API_KEY is missing or invalid — set the environment variable and retry."
@@ -121,6 +128,23 @@ class AnthropicProvider(AbstractProvider):
                     raise
         return None
 
+    @classmethod
+    def patch_target(cls) -> tuple[type, str]:
+        from anthropic.resources.messages import AsyncMessages
+
+        return (AsyncMessages, "content")
+
+    def parse_response(self, response: object, model: str = "unknown") -> list[RecutStep]:
+        return parse_response_to_steps(response, model=model)
+
+    def build_messages(
+        self,
+        steps: list[RecutStep],
+        injection: dict,
+        prompt: str = "",
+    ) -> list[dict]:
+        return _steps_to_messages(steps, injection, prompt=prompt)
+
     async def replay_from(
         self,
         steps: list[RecutStep],
@@ -134,7 +158,7 @@ class AnthropicProvider(AbstractProvider):
         history as context.
         """
         history = steps[: fork_index + 1]
-        messages = _steps_to_messages(history, injection, prompt=prompt)
+        messages = self.build_messages(history, injection, prompt=prompt)
         if not messages or messages[-1]["role"] == "assistant":
             messages.append({"role": "user", "content": "Continue from this point."})
 
@@ -152,6 +176,9 @@ class AnthropicProvider(AbstractProvider):
         for offset, step in enumerate(replayed):
             step.index = fork_index + offset
         return replayed
+
+
+register("anthropic", AnthropicProvider())
 
 
 def parse_response_to_steps(response: Any, model: str = "unknown") -> list[RecutStep]:

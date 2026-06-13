@@ -247,7 +247,7 @@ class TestAnthropicProviderErrors:
         from recut.providers.anthropic import AnthropicProvider
 
         provider = AnthropicProvider()
-        provider._client.messages.create = AsyncMock(
+        provider._get_client().messages.create = AsyncMock(
             side_effect=anthropic.AuthenticationError(
                 message="invalid key",
                 response=MagicMock(status_code=401, headers={}),
@@ -282,7 +282,7 @@ class TestAnthropicProviderErrors:
                 )
             return mock_response
 
-        provider._client.messages.create = side_effect
+        provider._get_client().messages.create = side_effect
 
         steps = [s async for s in provider.run_agent("test")]
         assert call_count == 3

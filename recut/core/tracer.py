@@ -13,7 +13,6 @@ from typing import Any, Literal
 from recut.core.auditor import audit as _audit
 from recut.core.auditor import peek as _peek
 from recut.flagging.fingerprint import get_fingerprint_flags
-from recut.providers.anthropic import AnthropicProvider
 from recut.providers.base import AbstractProvider
 from recut.schema.trace import (
     RecutStep,
@@ -247,7 +246,23 @@ def _extract_prompt(args: tuple, kwargs: dict) -> str:
 
 
 def _default_provider() -> AbstractProvider:
-    return AnthropicProvider()
+    try:
+        import recut.providers.anthropic  # noqa: F401
+    except ImportError:
+        pass
+    try:
+        import recut.providers.openai  # noqa: F401
+    except ImportError:
+        pass
+    from recut.providers.registry import get_registered
+
+    registered = get_registered()
+    if not registered:
+        raise ImportError(
+            "No recut provider registered. "
+            "Install one: pip install 'recut-ai[anthropic]' or 'recut-ai[openai]'"
+        )
+    return next(iter(registered.values()))
 
 
 async def _maybe_fingerprint(trace: RecutTrace) -> None:

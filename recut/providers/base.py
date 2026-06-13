@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
+from typing import Any
 
 from recut.schema.trace import RecutStep
 
@@ -40,4 +41,25 @@ class AbstractProvider(ABC):
         tools: list[dict] | None = None,
     ) -> AsyncIterator[RecutStep]:
         """Run the agent and yield steps as they stream in."""
+        ...
+
+    @classmethod
+    @abstractmethod
+    def patch_target(cls) -> tuple[type, str]:
+        """Return (SDK class to monkey-patch, response attribute that marks non-streaming)."""
+        ...
+
+    @abstractmethod
+    def parse_response(self, response: Any, model: str = "unknown") -> list[RecutStep]:
+        """Convert a raw SDK response object into RecutStep list."""
+        ...
+
+    @abstractmethod
+    def build_messages(
+        self,
+        steps: list[RecutStep],
+        injection: dict,
+        prompt: str = "",
+    ) -> list[dict]:
+        """Convert stored steps into provider-native message dicts for replay."""
         ...

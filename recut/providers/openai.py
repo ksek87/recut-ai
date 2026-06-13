@@ -11,6 +11,7 @@ import openai as _openai
 from recut.providers._pricing import OPENAI_PRICING, resolve_cost
 from recut.providers._utils import get_api_timeout
 from recut.providers.base import AbstractProvider
+from recut.providers.registry import register
 from recut.schema.trace import (
     ReasoningSource,
     RecutStep,
@@ -40,10 +41,16 @@ class OpenAIProvider(AbstractProvider):
     ):
         self.model = model
         self.infer_reasoning = infer_reasoning
-        self._client = _openai.AsyncOpenAI(
-            api_key=api_key or os.environ.get("OPENAI_API_KEY"),
-            timeout=get_api_timeout(),
-        )
+        self._api_key = api_key
+        self._client: _openai.AsyncOpenAI | None = None
+
+    def _get_client(self) -> _openai.AsyncOpenAI:
+        if self._client is None:
+            self._client = _openai.AsyncOpenAI(
+                api_key=self._api_key or os.environ.get("OPENAI_API_KEY"),
+                timeout=get_api_timeout(),
+            )
+        return self._client
 
     def supports_native_reasoning(self) -> bool:
         return False
@@ -69,7 +76,7 @@ class OpenAIProvider(AbstractProvider):
 
     async def _infer_reasoning(self, content: str) -> StepReasoning:
         try:
-            response = await self._client.chat.completions.create(
+            response = await self._get_client().chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": _INFERRED_REASONING_PROMPT},
@@ -106,11 +113,28 @@ class OpenAIProvider(AbstractProvider):
         if tools:
             kwargs["tools"] = tools
 
-        response = await self._client.chat.completions.create(**kwargs)
+        response = await self._get_client().chat.completions.create(**kwargs)
         for step in parse_response_to_steps(response, model=self.model):
             if self.infer_reasoning and step.type != StepType.REASONING:
                 step.reasoning = await self._infer_reasoning(step.content)
             yield step
+
+    @classmethod
+    def patch_target(cls) -> tuple[type, str]:
+        from openai.resources.chat.completions import AsyncCompletions
+
+        return (AsyncCompletions, "choices")
+
+    def parse_response(self, response: object, model: str = "unknown") -> list[RecutStep]:
+        return parse_response_to_steps(response, model=model)
+
+    def build_messages(
+        self,
+        steps: list[RecutStep],
+        injection: dict,
+        prompt: str = "",
+    ) -> list[dict]:
+        return _steps_to_chat_messages(steps, injection, prompt=prompt)
 
     async def replay_from(
         self,
@@ -125,16 +149,19 @@ class OpenAIProvider(AbstractProvider):
         history as context.
         """
         history = steps[: fork_index + 1]
-        messages = _steps_to_chat_messages(history, injection, prompt=prompt)
+        messages = self.build_messages(history, injection, prompt=prompt)
         if not messages or messages[-1]["role"] == "assistant":
             messages.append({"role": "user", "content": "Continue from this point."})
 
         kwargs: dict = {"model": self.model, "messages": messages}
-        response = await self._client.chat.completions.create(**kwargs)
+        response = await self._get_client().chat.completions.create(**kwargs)
         replayed = parse_response_to_steps(response, model=self.model)
         for offset, step in enumerate(replayed):
             step.index = fork_index + offset
         return replayed
+
+
+register("openai", OpenAIProvider())
 
 
 def parse_response_to_steps(response: Any, model: str = "unknown") -> list[RecutStep]:

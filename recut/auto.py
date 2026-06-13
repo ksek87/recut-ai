@@ -112,21 +112,18 @@ def run(run_id: str | None = None) -> Iterator[str]:
 
 
 def _patch_targets() -> list[tuple[str, type, str]]:
-    """Return (provider, class to patch, response attr that marks non-streaming)."""
-    targets: list[tuple[str, type, str]] = []
+    """Return (provider, class to patch, response attr) from all registered providers."""
     try:
-        from anthropic.resources.messages import AsyncMessages
-
-        targets.append(("anthropic", AsyncMessages, "content"))
+        import recut.providers.anthropic  # noqa: F401
     except ImportError:
         pass
     try:
-        from openai.resources.chat.completions import AsyncCompletions
-
-        targets.append(("openai", AsyncCompletions, "choices"))
+        import recut.providers.openai  # noqa: F401
     except ImportError:
         pass
-    return targets
+    from recut.providers.registry import get_registered
+
+    return [(name, *p.patch_target()) for name, p in get_registered().items()]
 
 
 def _install_wrapper(
@@ -164,13 +161,13 @@ async def _capture(
     provider: str,
 ) -> None:
     try:
-        if provider == "anthropic":
-            from recut.providers.anthropic import parse_response_to_steps as parse_fn
-        else:
-            from recut.providers.openai import parse_response_to_steps as parse_fn
+        from recut.providers.registry import get_registered
 
+        provider_instance = get_registered().get(provider)
+        if provider_instance is None:
+            return
         model = str(kwargs.get("model") or getattr(response, "model", "unknown"))
-        steps = parse_fn(response, model=model)
+        steps = provider_instance.parse_response(response, model=model)
         if not steps:
             return
         rid = _current_run.get()
