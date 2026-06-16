@@ -15,11 +15,22 @@ Reads OpenInference semantic convention attributes first
 (``output.value``, ``llm.output_messages.0.message.content``), then
 falls back to generic OTel span names. Compatible with any OTel SDK via
 duck typing — the ``opentelemetry`` package is not a hard dependency.
+
+Threading model
+---------------
+``on_end`` is called synchronously on whichever thread ends the span — it
+must not block or raise (OTel spec).  All mutation here is protected by
+``_lock`` and uses only non-blocking deque operations.  Assembled traces
+are buffered in ``_ready``; async persistence is scheduled onto any
+running event loop, or flushed synchronously by ``force_flush()``.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import threading
+from collections import deque
 from typing import Any
 
 from recut.core.tracer import _coerce_mode, _persist_trace
@@ -29,6 +40,7 @@ from recut.storage import write_queue
 _log = logging.getLogger(__name__)
 
 _MAX_INCOMPLETE_TRACES = 512
+_MAX_READY_TRACES = 512
 
 _OPENINFERENCE_KIND_MAP: dict[str, StepType] = {
     "LLM": StepType.OUTPUT,
@@ -60,13 +72,37 @@ def _span_to_step(span: Any, index: int) -> RecutStep:
     return RecutStep(index=index, type=step_type, content=_extract_content(span))
 
 
+def _build_trace(
+    spans: list[Any],
+    root_span: Any,
+    agent_id: str,
+    mode: TraceMode,
+) -> RecutTrace:
+    steps = [_span_to_step(s, i) for i, s in enumerate(spans)]
+    attrs = root_span.attributes or {}
+    trace_obj = RecutTrace(
+        agent_id=agent_id,
+        prompt=str(attrs.get("input.value", "")),
+        mode=mode,
+        language=TraceLanguage.SIMPLE,
+        meta=TraceMeta(
+            model=str(attrs.get("llm.model_name", "unknown")),
+            provider="otel",
+            total_steps=len(steps),
+        ),
+    )
+    trace_obj.steps.extend(steps)
+    return trace_obj
+
+
 class RecutSpanProcessor:
     """
     OTel SpanProcessor that groups spans by trace_id and persists as RecutTrace.
 
-    Compatible with any OTel SDK via duck typing — no opentelemetry dependency
-    is required at runtime. The processor is registered with a TracerProvider
-    and receives spans as they end.
+    Thread-safe: ``on_end`` only does non-blocking synchronous work under a
+    lock.  Assembled traces are buffered in a bounded deque and drained
+    asynchronously.  Call ``await processor.drain()`` or rely on
+    ``force_flush()`` (called by the OTel SDK on shutdown) to ensure delivery.
     """
 
     def __init__(
@@ -76,54 +112,78 @@ class RecutSpanProcessor:
     ) -> None:
         self._agent_id = agent_id
         self._mode = _coerce_mode(mode)
-        self._traces: dict[int, list[Any]] = {}
+        self._incomplete: dict[int, list[Any]] = {}
+        self._ready: deque[RecutTrace] = deque(maxlen=_MAX_READY_TRACES)
+        self._lock = threading.Lock()
+        self._bg_tasks: set[asyncio.Task] = set()
 
     def on_start(self, span: Any, parent_context: Any = None) -> None:
         pass
 
     def on_end(self, span: Any) -> None:
+        trace_obj = self._try_complete(span)
+        if trace_obj is not None:
+            self._ready.append(trace_obj)
+            self._schedule_drain()
+
+    def _try_complete(self, span: Any) -> RecutTrace | None:
         ctx = span.context
         if ctx is None:
-            return
+            return None
 
-        trace_id = ctx.trace_id
-        spans = self._traces.setdefault(trace_id, [])
-        spans.append(span)
+        with self._lock:
+            trace_id = ctx.trace_id
+            spans = self._incomplete.setdefault(trace_id, [])
+            spans.append(span)
 
-        # Evict oldest incomplete trace if the buffer is full (e.g. root span never arrived)
-        if len(self._traces) > _MAX_INCOMPLETE_TRACES:
-            self._traces.pop(next(iter(self._traces)))
+            if len(self._incomplete) > _MAX_INCOMPLETE_TRACES:
+                self._incomplete.pop(next(iter(self._incomplete)))
 
-        parent = getattr(span, "parent", None)
-        is_root = parent is None or not getattr(parent, "is_valid", True)
-        if not is_root:
-            return
+            parent = getattr(span, "parent", None)
+            is_root = parent is None or not getattr(parent, "is_valid", True)
+            if not is_root:
+                return None
 
-        steps = [_span_to_step(s, i) for i, s in enumerate(spans)]
-        attrs = span.attributes or {}
-        model = str(attrs.get("llm.model_name", "unknown"))
-        prompt = str(attrs.get("input.value", ""))
-        trace_obj = RecutTrace(
-            agent_id=self._agent_id,
-            prompt=prompt,
-            mode=self._mode,
-            language=TraceLanguage.SIMPLE,
-            meta=TraceMeta(model=model, provider="otel", total_steps=len(steps)),
-        )
-        trace_obj.steps.extend(steps)
-        del self._traces[trace_id]
+            complete_spans = self._incomplete.pop(trace_id)
+
+        return _build_trace(complete_spans, span, self._agent_id, self._mode)
+
+    def _schedule_drain(self) -> None:
         try:
-            import asyncio
-
-            asyncio.get_running_loop()
-            asyncio.create_task(write_queue.enqueue(_persist_trace(trace_obj)))
+            loop = asyncio.get_running_loop()
         except RuntimeError:
-            _log.debug("recut: OTel ingester called outside async context — trace not persisted")
-        except Exception as exc:
-            _log.debug("recut: OTel ingester persist failed: %s", exc)
+            # Called from a non-async thread. Trace stays buffered in _ready
+            # until drain() or force_flush() is called.
+            return
+        task = loop.create_task(self._drain())
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+
+    async def _drain(self) -> None:
+        while self._ready:
+            trace_obj = self._ready.popleft()
+            await write_queue.enqueue(_persist_trace(trace_obj))
+
+    async def drain(self) -> None:
+        """Flush all buffered traces. Call from an async context."""
+        await self._drain()
 
     def force_flush(self, timeout_millis: int = 30_000) -> bool:
+        """Synchronously flush buffered traces. Called by the OTel SDK on shutdown."""
+        if not self._ready:
+            return True
+        try:
+            loop = asyncio.get_running_loop()
+            # Running inside an async context — schedule and wait from another thread.
+            future = asyncio.run_coroutine_threadsafe(self._drain(), loop)
+            future.result(timeout=timeout_millis / 1000)
+        except RuntimeError:
+            # No running event loop — create a temporary one.
+            asyncio.run(self._drain())
+        except Exception as exc:
+            _log.debug("recut: OTel force_flush failed: %s", exc)
         return True
 
     def shutdown(self) -> None:
-        self._traces.clear()
+        self._incomplete.clear()
+        self._ready.clear()
